@@ -27,7 +27,8 @@
   `(let ((,v4l2-var (open-v4l2 ,path :w ,w :h ,h :pixformat ,pixformat :n-buffs ,n-buffs)))
      (unwind-protect
 	  (progn ,@body)
-       (close-v4l2 ,v4l2-var))))
+       (when (v4l2-openp ,v4l2-var)
+	 (close-v4l2 ,v4l2-var)))))
 
 (defun write-frames-to-ffmpeg-fifo-w/o-threads (v4l2 fifo-fd)
   (loop
@@ -39,3 +40,15 @@
      when buff-ptr do (progn (isys:%sys-write fifo-fd buff-ptr sz)
 			     (v4l2:put-frame capture-fd frame))))
 
+(defun split-video-stream-into-fifos-w/o-threads (v4l2 fifos-and-cmds)
+  (loop
+     with capture-fd = (v4l2-fd v4l2)
+     with frame-size = (slot-value (v4l2:format-pix 
+				   (v4l2:get-image-format capture-fd))
+				  'v4l2:sizeimage)
+     with capture-buffers = (v4l2-buffers v4l2)
+     do (loop for (fifo-fd cmd) in fifos-and-cmds
+	   for frame    = (w/o-errors (v4l2:get-frame capture-fd))
+	   as  buff-ptr = (when frame (second (nth frame capture-buffers)))
+	   when buff-ptr do (progn (isys:%sys-write fifo-fd buff-ptr frame-size)
+				   (v4l2:put-frame capture-fd frame)))))
