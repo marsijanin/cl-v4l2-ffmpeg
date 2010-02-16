@@ -67,3 +67,42 @@
 	   as  buff-ptr = (when frame (second (nth frame capture-buffers)))
 	   when buff-ptr do (progn (isys:%sys-write fifo-fd buff-ptr frame-size)
 				   (v4l2:put-frame capture-fd frame)))))
+
+(defstruct ffmpeg-fifoo 
+  fd
+  in
+  out
+  openp
+  (input-size "640x480")
+  output-size
+  (input-pix-fmt "rgb24")
+  (input-format "rawvideo")
+  (output-format "mpeg"))
+
+(defun format-ffmepg (ff &optional (ffmpeg "/usr/bin/ffmpeg"))
+  #|(assert (ffmpeg-fifoo-openp ff) () "Can't send data to the closed fifo")|#
+  (with-slots (in out input-format output-format input-pix-fmt input-size output-size) ff
+    (format nil "~A -f ~A -s ~A -pix_fmt ~A -i ~A -f ~A ~A"
+	    ffmpeg input-format input-size input-pix-fmt in output-format out)))
+
+(isys:defsyscall (%sys-system "system") :int
+  (command :string))
+
+(defun open-ffmeg-fifo (in out &key (input-size "640x480") output-size
+			(input-pix-fmt "rgb24") (input-format "rawvideo")
+			(output-format "mpeg"))
+  (let ((ff (make-ffmpeg-fifoo :in in
+			       :out out
+			       :input-size input-size
+			       :output-size output-size
+			       :input-pix-fmt input-pix-fmt
+			       :input-format input-format
+			       :output-format output-format)))
+    (multiple-value-bind (in-path in-type) (iolib.os:file-exists-p in)
+      (cond
+	((and in-path (not (eql in-type :pipe)))
+	 (error "Input pathname ~a exist and it is not an fifo" in-path))
+	((null in-path) (isys:%sys-mkfifo in #o660))))
+    (setf (ffmpeg-fifoo-fd ff) (isys:%sys-open in isys:o-rdonly)
+	  (ffmpeg-fifoo-openp ff) t)
+    ff))
