@@ -68,41 +68,51 @@
 	   when buff-ptr do (progn (isys:%sys-write fifo-fd buff-ptr frame-size)
 				   (v4l2:put-frame capture-fd frame)))))
 
-(defstruct ffmpeg-fifoo 
-  fd
-  in
-  out
-  openp
+(defstruct ffmpeg-fifo 
+  stream
+  (in "-")
+  (out "-")
   (input-size "640x480")
-  output-size
+  output-size 
   (input-pix-fmt "rgb24")
   (input-format "rawvideo")
-  (output-format "mpeg"))
+  (output-format "mpeg")
+  input-frame-rate output-frame-rate)
 
-(defun format-ffmepg (ff &optional (ffmpeg "/usr/bin/ffmpeg"))
-  #|(assert (ffmpeg-fifoo-openp ff) () "Can't send data to the closed fifo")|#
-  (with-slots (in out input-format output-format input-pix-fmt input-size output-size) ff
-    (format nil "~A -f ~A -s ~A -pix_fmt ~A -i ~A -f ~A ~A"
-	    ffmpeg input-format input-size input-pix-fmt in output-format out)))
+(defun ffmpeg-args (ff)
+  (with-slots (in input-format input-size input-pix-fmt input-frame-rate 
+		  output-format output-size output-frame-rate out) ff
+    (append (list "-f" input-format)
+	    (list "-s" input-size)
+	    (list "-pix_fmt" input-pix-fmt)
+	    (when input-frame-rate
+	      (list "-r" input-frame-rate))
+	    (list "-i" in)
+	    (when output-format
+	      (list "-f" output-format))
+	    (when output-size
+	      (list "-s" output-size))
+	    (when output-frame-rate
+	      (list "-r" output-frame-rate))
+	    (list out))))
 
-(isys:defsyscall (%sys-system "system") :int
-  (command :string))
-
-(defun open-ffmeg-fifo (in out &key (input-size "640x480") output-size
-			(input-pix-fmt "rgb24") (input-format "rawvideo")
-			(output-format "mpeg"))
-  (let ((ff (make-ffmpeg-fifoo :in in
-			       :out out
-			       :input-size input-size
-			       :output-size output-size
-			       :input-pix-fmt input-pix-fmt
-			       :input-format input-format
-			       :output-format output-format)))
-    (multiple-value-bind (in-path in-type) (iolib.os:file-exists-p in)
-      (cond
-	((and in-path (not (eql in-type :pipe)))
-	 (error "Input pathname ~a exist and it is not an fifo" in-path))
-	((null in-path) (isys:%sys-mkfifo in #o660))))
-    (setf (ffmpeg-fifoo-fd ff) (isys:%sys-open in isys:o-rdonly)
-	  (ffmpeg-fifoo-openp ff) t)
+(defun run-ffmpeg-fifo (&key (in "-") (out "-")
+			(input-size "640x480")
+			output-size 
+			(input-pix-fmt "rgb24")
+			(input-format "rawvideo")
+			(output-format "mpeg")
+			input-frame-rate output-frame-rate)
+  (let* ((ff (make-ffmpeg-fifo :in in
+				:out out
+				:input-size input-size
+				:input-pix-fmt input-pix-fmt
+				:input-format input-format
+				:output-format output-format
+				:output-size output-size
+				:input-frame-rate input-frame-rate
+				:output-frame-rate output-frame-rate))
+	 (stream (ltk:do-execute "/usr/bin/ffmpeg" (ffmpeg-args ff))))
+    (setf (ffmpeg-fifo-stream ff) stream)
     ff))
+
