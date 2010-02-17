@@ -96,6 +96,28 @@
 	      (list "-r" output-frame-rate))
 	    (list out))))
 
+(defun argv-to-foreign (argv)
+  (loop
+     with ln = (+ (length argv) 1)
+     with foreign-argv = (cffi:foreign-alloc :pointer :count ln)
+     for str in argv
+     as i = 0 then (+ 1 i)
+     do (setf (cffi:mem-aref foreign-argv :pointer i) (cffi:foreign-string-alloc str))
+     finally (progn
+	       (setf (cffi:mem-aref foreign-argv :pointer (- ln 1)) (cffi:null-pointer))
+	       (return foreign-argv))))
+
+(defun free-foreign-argv (ptr sz)
+  (loop 
+     for i below sz 
+     do (cffi:foreign-free (cffi:mem-aref ptr :pointer i))
+     finally (cffi:foreign-free ptr)))
+
+(defmacro with-foreign-argv ((ptr &rest argv) &body body)
+  `(let ((,ptr (argv-to-foreign (list ,@argv))))
+     (unwind-protect (progn ,@body)
+       (free-foreign-argv ,ptr ,(+ (length argv) 1)))))
+
 (defun run-ffmpeg-fifo (&key (in "-") (out "-")
 			(input-size "640x480")
 			output-size 
