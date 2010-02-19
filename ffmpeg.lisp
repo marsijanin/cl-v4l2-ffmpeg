@@ -120,25 +120,6 @@
      (unwind-protect (progn ,@body)
        (free-foreign-argv ,argv (+ (length ,args) 1)))))
 
-#|(defun run-ffmpeg-fifo (&key (in "-") (out "-")
-			(input-size "640x480")
-			output-size 
-			(input-pix-fmt "rgb24")
-			(input-format "rawvideo")
-			(output-format "mpeg")
-			input-frame-rate output-frame-rate)
-  (let* ((ff (make-ffmpeg-fifo :in in
-				:out out
-				:input-size input-size
-				:input-pix-fmt input-pix-fmt
-				:input-format input-format
-				:output-format output-format
-				:output-size output-size
-				:input-frame-rate input-frame-rate
-				:output-frame-rate output-frame-rate))
-	 (stream (ltk:do-execute "/usr/bin/ffmpeg" (ffmpeg-args ff))))
-    (setf (ffmpeg-fifo-stream ff) stream)
-    ff))|#
 
 (defstruct process-pipe 
   pid alivep input-fd output-fd)
@@ -169,3 +150,26 @@
 				     :alivep t
 				     :input-fd fd2
 				     :output-fd fd0)))))))))
+
+(defun run-ffmpeg-pipe (&key (ffmpeg "/usr/bin/ffmpeg")
+			(in "-") (out "-")
+			(input-size "640x480")
+			output-size 
+			(input-pix-fmt "rgb24")
+			(input-format "rawvideo")
+			(output-format "mpeg")
+			input-frame-rate output-frame-rate)
+  (let* ((ff (make-ffmpeg-fifo :in in
+			  :out out
+			  :input-size input-size
+			  :input-pix-fmt input-pix-fmt
+			  :input-format input-format
+			  :output-format output-format
+			  :output-size output-size
+			  :input-frame-rate input-frame-rate
+			  :output-frame-rate output-frame-rate))
+	 (args (append (list ffmpeg) (ffmpeg-args ff))))
+    (format t "Runing  \"~{~a ~}\"" args)
+    (run-process-pipe ffmpeg args)))
+
+
