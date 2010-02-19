@@ -113,12 +113,12 @@
      do (cffi:foreign-free (cffi:mem-aref ptr :pointer i))
      finally (cffi:foreign-free ptr)))
 
-(defmacro with-foreign-argv ((ptr &rest argv) &body body)
-  `(let ((,ptr (argv-to-foreign (list ,@argv))))
+(defmacro with-foreign-argv ((argv args) &body body)
+  `(let ((,argv (argv-to-foreign ,args)))
      (unwind-protect (progn ,@body)
-       (free-foreign-argv ,ptr ,(+ (length argv) 1)))))
+       (free-foreign-argv ,argv (+ (length ,args) 1)))))
 
-(defun run-ffmpeg-fifo (&key (in "-") (out "-")
+#|(defun run-ffmpeg-fifo (&key (in "-") (out "-")
 			(input-size "640x480")
 			output-size 
 			(input-pix-fmt "rgb24")
@@ -136,5 +136,34 @@
 				:output-frame-rate output-frame-rate))
 	 (stream (ltk:do-execute "/usr/bin/ffmpeg" (ffmpeg-args ff))))
     (setf (ffmpeg-fifo-stream ff) stream)
-    ff))
+    ff))|#
 
+(defstruct process-pipe 
+  pid alivep input-fd output-fd)
+
+(defun run-process-pipe (cmd args &optional bind-err-to-out)
+  (flet ((bindfd (old new pair)
+	   (isys:%sys-close pair)
+	   (isys:%sys-dup2 old new)
+	   (isys:%sys-close old)))
+    (multiple-value-bind (fd0 fd1)
+	(isys:%sys-pipe)
+      (multiple-value-bind (fd2 fd3)
+	  (isys:%sys-pipe)
+	(with-foreign-argv (argv args)
+	  (let ((pid (isys:%sys-fork)))
+	    (if (zerop pid)
+		(progn
+		  (bindfd fd1 0 fd0)
+		  (when bind-err-to-out
+		    (isys:%sys-dup2 fd3 3))
+		  (bindfd fd3 1 fd2)
+		  (isys:%sys-execv cmd argv)
+		  #+sbcl(sb-ext:quit :unix-status 1))
+		(progn
+		  (isys:%sys-close fd1)
+		  (isys:%sys-close fd3)
+		  (make-process-pipe :pid pid
+				     :alivep t
+				     :input-fd fd2
+				     :output-fd fd0)))))))))
