@@ -45,7 +45,9 @@
 			       end-test-form return-form)
 			       &body body)
   `(with-v4l2 (,v4l2-var ,path :w ,w :h ,h :pixformat ,pixformat :n-buffs ,n-buffs)
-     (do-frames (,frame-var ,v4l2-var ,end-test-form ,return-form)
+     (do-frames (,frame-var ,v4l2-var
+			    :end-test-form ,end-test-form
+			    :return-form ,return-form)
        ,@body)))
 
 (defun write-frames-to-ffmpeg-fifo-w/o-threads (v4l2 fifo-fd)
