@@ -122,34 +122,37 @@
 
 
 (defstruct process-pipe 
-  pid alivep input-fd output-fd)
+  pid alivep input-fd output-fd error-fd)
 
-(defun run-process-pipe (cmd args &optional bind-err-to-out)
-  (flet ((bindfd (old new pair)
-	   (isys:%sys-close pair)
-	   (isys:%sys-dup2 old new)
-	   (isys:%sys-close old)))
-    (multiple-value-bind (fd0 fd1)
+(defun run-process-pipe (cmd args)
+  (flet ((bindfd (fd child parent)
+	   (isys:%sys-close parent)
+	   (isys:%sys-dup2 child fd)
+	   (isys:%sys-close child)))
+    (multiple-value-bind (child-in parent-out)
 	(isys:%sys-pipe)
-      (multiple-value-bind (fd2 fd3)
+      (multiple-value-bind (parent-in child-out)
 	  (isys:%sys-pipe)
+	(multiple-value-bind (parent-err child-err)
+	    (isys:%sys-pipe)
 	(with-foreign-argv (argv args)
 	  (let ((pid (isys:%sys-fork)))
 	    (if (zerop pid)
 		(progn
-		  (bindfd fd1 0 fd0)
-		  (when bind-err-to-out
-		    (isys:%sys-dup2 fd3 3))
-		  (bindfd fd3 1 fd2)
+		  (bindfd 0 child-in parent-out)
+		  (bindfd 1 child-out parent-in)
+		  (bindfd 3 child-err parent-err)
 		  (isys:%sys-execv cmd argv)
 		  #+sbcl(sb-ext:quit :unix-status 1))
 		(progn
-		  (isys:%sys-close fd1)
-		  (isys:%sys-close fd3)
+		  (isys:%sys-close child-in)
+		  (isys:%sys-close child-out)
+		  (isys:%sys-close child-err)
 		  (make-process-pipe :pid pid
 				     :alivep t
-				     :input-fd fd2
-				     :output-fd fd0)))))))))
+				     :input-fd parent-in
+				     :output-fd parent-out
+				     :error-fd parent-err))))))))))
 
 (defun run-ffmpeg-pipe (&key (ffmpeg "/usr/bin/ffmpeg")
 			(in "-") (out "-")
