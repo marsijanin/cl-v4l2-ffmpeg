@@ -151,8 +151,8 @@
 		  (isys:%sys-close child-err)
 		  (make-process-pipe :pid pid
 				     :alivep t
-				     :input-fd parent-in
-				     :output-fd parent-out
+				     :input-fd parent-out
+				     :output-fd parent-in
 				     :error-fd parent-err))))))))))
 
 (defun run-ffmpeg-pipe (&key (ffmpeg "/usr/bin/ffmpeg")
