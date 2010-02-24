@@ -7,6 +7,8 @@
   (defvar *want-height* 288)
 
   ;; what we really get
+  (defparameter *got-width* nil)
+  (defparameter *got-height* nil)
 
   (defparameter *camera-widget* nil)
   (defparameter *camera-data* nil)
@@ -36,29 +38,41 @@
 
 (defun capture-thread ()
   (format t "cap thread start~%")
-  (with-v4l2-do-frames (v4l2 frame buff *capture-device*
-			     :w *want-width*
-			     :h *want-height*
-			     :end-test-form *cap-thread-stop*
-			     :return-form (format t "cap thread exit~%"))
-    (isys:%sys-write (process-pipe-input-fd *ffmpeg-pipe*)
-		     (second buff)
-		     (* *want-height* *want-width*))
-    (bt:with-lock-held (*camera-data-lock*)
-      (declare (optimize (speed 3) (debug 0) (safety 0))
-	       (type (simple-array (unsigned-byte 8) (#.(* *want-width* *want-height* 4)))
-		     *camera-data*)
-	       (type fixnum *want-height* *want-width*))
-      (loop for i fixnum from 0 below (* *want-height* *want-width*) do
-	   (let ((r (cffi:mem-aref buff :uchar (+ (* 3 i) 0)))
-		 (g (cffi:mem-aref buff :uchar (+ (* 3 i) 1)))
-		 (b (cffi:mem-aref buff :uchar (+ (* 3 i) 2))))
-	     (setf (aref *camera-data* (+ (* 4 i) 0)) r
-		   (aref *camera-data* (+ (* 4 i) 1)) g
-		   (aref *camera-data* (+ (* 4 i) 2)) b))))
-    (when *camera-widget*
-      (gtk:with-main-loop
-	(gtk:widget-queue-draw *camera-widget*)))))
+  (with-v4l2 (v4l2 *capture-device*
+		   :w *want-width*
+		   :h *want-height*)
+    (with-slots ((w v4l2:width) (h v4l2:height) (s v4l2:sizeimage) (p v4l2:pixelformat))
+	(v4l2:format-pix (v4l2:get-image-format (v4l2-fd v4l2)))
+      (setf *got-width* w
+	    *got-height* h
+       *camera-data* (make-array (* h w 4)
+				 :element-type '(unsigned-byte 8)
+				 :initial-element #xff)
+       *ffmpeg-pipe* (run-ffmpeg-pipe
+		      :input-size (format nil "~dx~d" w h)
+		      :out "video.mpg"))
+      (format t "got ~Dx~D size ~D, format ~S~%"
+	      w h s (format-string p)))
+    (do-frames (frame buff v4l2
+		      :end-test-form *cap-thread-stop*
+		      :return-form (format t "cap thread exit~%"))
+      (isys:%sys-write (process-pipe-input-fd *ffmpeg-pipe*)
+		       (second buff)
+		       (* *got-height* *got-width*))
+      (bt:with-lock-held (*camera-data-lock*)
+	(declare (optimize (speed 3) (debug 0) (safety 0))
+		 (type (simple-array (unsigned-byte 8) (*)) *camera-data*)
+		 (type fixnum *got-height* *got-width*))
+	(loop for i fixnum from 0 below (* *got-height* *got-width*) do
+	     (let ((r (cffi:mem-aref buff :uchar (+ (* 3 i) 0)))
+		   (g (cffi:mem-aref buff :uchar (+ (* 3 i) 1)))
+		   (b (cffi:mem-aref buff :uchar (+ (* 3 i) 2))))
+	       (setf (aref *camera-data* (+ (* 4 i) 0)) r
+		     (aref *camera-data* (+ (* 4 i) 1)) g
+		     (aref *camera-data* (+ (* 4 i) 2)) b))))
+      (when *camera-widget*
+	(gtk:with-main-loop
+	  (gtk:widget-queue-draw *camera-widget*))))))
 
 (defun camera-init (widget)
   (declare (ignore widget))
@@ -71,8 +85,8 @@
   (gl:tex-image-2d :texture-rectangle-arb
 		   0
 		   :rgb8
-		   *want-width*
-		   *want-height*
+		   *got-width*
+		   *got-height*
 		   0
 		   :rgba
 		   :unsigned-byte
@@ -81,13 +95,13 @@
   (gl:new-list 1 :compile)
 
   (gl:begin :quads)
-  (gl:tex-coord 0 *want-height*)
+  (gl:tex-coord 0 *got-height*)
   (gl:vertex 0.0 0.0)
   (gl:tex-coord 0 0)
   (gl:vertex 0.0 1.0)
-  (gl:tex-coord *want-width* 0)
+  (gl:tex-coord *got-width* 0)
   (gl:vertex 1.0 1.0)
-  (gl:tex-coord *want-width* *want-height*)
+  (gl:tex-coord *got-width* *got-height*)
   (gl:vertex 1.0 0.0)
   (gl:end)
   (gl:end-list)
@@ -104,8 +118,8 @@
     (bt:with-lock-held (*camera-data-lock*)
       (gl:tex-sub-image-2d :texture-rectangle-arb 0
 			   0 0
-			   *want-width*
-			   *want-height*
+			   *got-width*
+			   *got-height*
 			   :rgba
 			   :unsigned-byte
 			   *camera-data*)))
@@ -139,22 +153,15 @@
   (gl:flush))
 
 (defun test ()
-  (unless *ffmpeg-pipe*
-    (setf *ffmpeg-pipe* (run-ffmpeg-pipe
-			 :input-size (format nil "~ax~a" *want-width* *want-height*)
-			 :out "video.mpg")))
-  (unless *camera-data* 
-    (setf *camera-data* (make-array (* *want-height* *want-width* 4)
-				    :element-type '(unsigned-byte 8)
-				    :initial-element #xff)))
   (let ((cap-thread (bt:make-thread #'capture-thread :name "capturer")))
+    (sleep 1)
     (gtk:with-main-loop
       (let ((window (make-instance 'gtk:gtk-window
 				   :type :toplevel
 				   :window-position :center
 				   :title "Hello world!"
-				   :default-width *want-width*
-				   :default-height *want-height*))
+				   :default-width *got-width*
+				   :default-height *got-height*))
 	    (hbox (make-instance 'gtk:h-box))
 	    (vbox (make-instance 'gtk:v-box))
 	    (quit-button (make-instance 'gtk:button :label "Quit")))
