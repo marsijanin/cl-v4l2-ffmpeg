@@ -49,7 +49,8 @@
 				 :element-type '(unsigned-byte 8)
 				 :initial-element #xff)
        *ffmpeg-pipe* (run-ffmpeg-pipe
-		      :input-size (format nil "~dx~d" w h)
+		      :input-width w
+		      :input-height h
 		      :out "video.mpg"))
       (format t "got ~Dx~D size ~D, format ~S~%"
 	      w h s (format-string p)))

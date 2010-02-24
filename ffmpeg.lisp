@@ -71,30 +71,31 @@
 	   when buff-ptr do (progn (isys:%sys-write fifo-fd buff-ptr frame-size)
 				   (v4l2:put-frame capture-fd frame)))))
 
-(defstruct ffmpeg-fifo 
+(defstruct ffmpeg-cmd
   stream
   (in "-")
   (out "-")
-  (input-size "640x480")
-  output-size 
+  (input-width 600)
+  (input-height 480)
+  output-with output-height
   (input-pix-fmt "rgb24")
   (input-format "rawvideo")
   (output-format "mpeg")
   input-frame-rate output-frame-rate)
 
-(defun ffmpeg-args (ff)
-  (with-slots (in input-format input-size input-pix-fmt input-frame-rate 
-		  output-format output-size output-frame-rate out) ff
+(defun ffmpeg-args (ffmpeg-cmd)
+  (with-slots (in input-format input-width input-height input-pix-fmt input-frame-rate 
+		  output-format output-with output-height output-frame-rate out) ffmpeg-cmd
     (append (list "-f" input-format)
-	    (list "-s" input-size)
+	    (list "-s" (format nil "~Dx~D" input-width input-height))
 	    (list "-pix_fmt" input-pix-fmt)
 	    (when input-frame-rate
 	      (list "-r" input-frame-rate))
 	    (list "-i" in)
 	    (when output-format
 	      (list "-f" output-format))
-	    (when output-size
-	      (list "-s" output-size))
+	    (when (and output-with output-height)
+	      (list "-s" (format nil "~Dx~D" output-with output-height)))
 	    (when output-frame-rate
 	      (list "-r" output-frame-rate))
 	    (list out))))
@@ -155,25 +156,10 @@
 				     :output-fd parent-in
 				     :error-fd parent-err))))))))))
 
-(defun run-ffmpeg-pipe (&key (ffmpeg "/usr/bin/ffmpeg")
-			(in "-") (out "-")
-			(input-size "640x480")
-			output-size 
-			(input-pix-fmt "rgb24")
-			(input-format "rawvideo")
-			(output-format "mpeg")
-			input-frame-rate output-frame-rate)
-  (let* ((ff (make-ffmpeg-fifo :in in
-			  :out out
-			  :input-size input-size
-			  :input-pix-fmt input-pix-fmt
-			  :input-format input-format
-			  :output-format output-format
-			  :output-size output-size
-			  :input-frame-rate input-frame-rate
-			  :output-frame-rate output-frame-rate))
-	 (args (append (list ffmpeg) (ffmpeg-args ff))))
+(defun run-ffmpeg-pipe (&rest ffmpeg-cmd-initargs)
+  (let* ((ffmpeg-cmd (apply #'make-ffmpeg-cmd ffmpeg-cmd-initargs))
+	 (args (append (list "ffmpeg") (ffmpeg-args ffmpeg-cmd))))
     (format t "Runing  \"~{~a ~}\"" args)
-    (run-process-pipe ffmpeg args)))
+    (run-process-pipe "/usr/bin/ffmpeg" args)))
 
 
