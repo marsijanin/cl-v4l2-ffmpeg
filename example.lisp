@@ -43,37 +43,42 @@
 		   :h *want-height*)
     (with-slots ((w v4l2:width) (h v4l2:height) (s v4l2:sizeimage) (p v4l2:pixelformat))
 	(v4l2:format-pix (v4l2:get-image-format (v4l2-fd v4l2)))
-      (setf *got-width* w
+      (setf *v4l2* v4l2
+	    *got-width* w
 	    *got-height* h
-       *camera-data* (make-array (* h w 4)
-				 :element-type '(unsigned-byte 8)
-				 :initial-element #xff)
-       *ffmpeg-pipe* (run-ffmpeg-pipe
-		      :input-width w
-		      :input-height h
-		      :out "video.mpg"))
+	    *camera-data* (make-array (* h w 4)
+				      :element-type '(unsigned-byte 8)
+				      :initial-element #xff)
+	    *ffmpeg-pipe* (run-ffmpeg-pipe
+			   :input-width w
+			   :input-height h
+			   :out "video.mpg"))
       (format t "got ~Dx~D size ~D, format ~S~%"
-	      w h s (format-string p)))
-    (do-frames (frame buff v4l2
-		      :end-test-form *cap-thread-stop*
-		      :return-form (format t "cap thread exit~%"))
-      (isys:%sys-write (process-pipe-input-fd *ffmpeg-pipe*)
-		       (second buff)
-		       (* *got-height* *got-width*))
-      (bt:with-lock-held (*camera-data-lock*)
-	(declare (optimize (speed 3) (debug 0) (safety 0))
-		 (type (simple-array (unsigned-byte 8) (*)) *camera-data*)
-		 (type fixnum *got-height* *got-width*))
-	(loop for i fixnum from 0 below (* *got-height* *got-width*) do
-	     (let ((r (cffi:mem-aref buff :uchar (+ (* 3 i) 0)))
-		   (g (cffi:mem-aref buff :uchar (+ (* 3 i) 1)))
-		   (b (cffi:mem-aref buff :uchar (+ (* 3 i) 2))))
-	       (setf (aref *camera-data* (+ (* 4 i) 0)) r
-		     (aref *camera-data* (+ (* 4 i) 1)) g
-		     (aref *camera-data* (+ (* 4 i) 2)) b))))
-      (when *camera-widget*
-	(gtk:with-main-loop
-	  (gtk:widget-queue-draw *camera-widget*))))))
+	      w h s (format-string p))
+    (with-process-pipe (ffmpeg  "/usr/bin/ffmpeg" (ffmpeg-args (make-ffmpeg-cmd :input-width w
+										:input-height h
+										:out "video.mpg")))
+      (setf *ffmpeg-pipe* ffmpeg)
+      (do-frames (frame buff v4l2
+			:end-test-form *cap-thread-stop*
+			:return-form (format t "cap thread exit~%"))
+	(isys:%sys-write (process-pipe-input-fd *ffmpeg-pipe*)
+			 (second buff)
+			 (* h w 3))
+	(bt:with-lock-held (*camera-data-lock*)
+	  (declare (optimize (speed 3) (debug 0) (safety 0))
+		   (type (simple-array (unsigned-byte 8) (*)) *camera-data*)
+		   (type fixnum *got-height* *got-width*))
+	  (loop for i fixnum from 0 below (* *got-height* *got-width*) do
+	       (let ((r (cffi:mem-aref buff :uchar (+ (* 3 i) 0)))
+		     (g (cffi:mem-aref buff :uchar (+ (* 3 i) 1)))
+		     (b (cffi:mem-aref buff :uchar (+ (* 3 i) 2))))
+		 (setf (aref *camera-data* (+ (* 4 i) 0)) r
+		       (aref *camera-data* (+ (* 4 i) 1)) g
+		       (aref *camera-data* (+ (* 4 i) 2)) b))))
+	(when *camera-widget*
+	  (gtk:with-main-loop
+	    (gtk:widget-queue-draw *camera-widget*))))))))
 
 (defun camera-init (widget)
   (declare (ignore widget))
