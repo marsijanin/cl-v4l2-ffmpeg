@@ -137,7 +137,7 @@
 	  (isys:%sys-pipe)
 	(multiple-value-bind (parent-err child-err)
 	    (isys:%sys-pipe)
-	(with-foreign-argv (argv args)
+	(with-foreign-argv (argv (cons cmd args))
 	  (let ((pid (isys:%sys-fork)))
 	    (if (zerop pid)
 		(progn
