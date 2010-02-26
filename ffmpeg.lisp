@@ -167,7 +167,9 @@
       (with-slots (pid) process-pipe
 	(isys:%sys-kill pid 15)	;term
 	(isys:%sys-kill pid 15)	;term
-	(isys:%sys-kill pid 9))	;and finally kill
+	(isys:%sys-kill pid 9)	;and finally kill
+	(isys:%sys-waitpid pid (cffi:null-pointer) 1) ;TODO - write path for iolib.syscalls
+	(isys:%sys-waitpid pid (cffi:null-pointer) 1))
     ((or isys:echild isys:esrch) (c) (declare (ignorable c)) t)))
 
 (defmacro with-process-pipe ((process-pipe cmd args) &body body)
