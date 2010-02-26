@@ -162,4 +162,16 @@
     (format t "Runing  \"~{~a ~}\"" args)
     (run-process-pipe "/usr/bin/ffmpeg" args)))
 
+(defun kill-process-pipe (process-pipe)
+  (handler-case
+      (with-slots (pid) process-pipe
+	(isys:%sys-kill pid 15)	;term
+	(isys:%sys-kill pid 15)	;term
+	(isys:%sys-kill pid 9))	;and finally kill
+    ((or isys:echild isys:esrch) (c) (declare (ignorable c)) t)))
 
+(defmacro with-process-pipe ((process-pipe cmd args) &body body)
+  `(let ((,process-pipe (run-process-pipe ,cmd ,args)))
+     (unwind-protect (progn ,@body)
+       (when ,process-pipe
+	 (kill-process-pipe ,process-pipe)))))
