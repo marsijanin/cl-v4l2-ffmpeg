@@ -180,3 +180,10 @@
      (unwind-protect (progn ,@body)
        (when ,process-pipe
 	 (kill-process-pipe ,process-pipe)))))
+
+(defmacro with-process-pipes (binds &body body)
+  (if binds
+      `(with-process-pipe ,(car binds)
+	 (with-process-pipes ,(cdr binds)
+	   ,@body))
+      `(progn ,@body)))
