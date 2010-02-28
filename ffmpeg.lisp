@@ -137,24 +137,24 @@
 	  (isys:%sys-pipe)
 	(multiple-value-bind (parent-err child-err)
 	    (isys:%sys-pipe)
-	(with-foreign-argv (argv (cons cmd args))
-	  (let ((pid (isys:%sys-fork)))
-	    (if (zerop pid)
-		(progn
-		  (bindfd 0 child-in parent-out)
-		  (bindfd 1 child-out parent-in)
-		  (bindfd 3 child-err parent-err)
-		  (isys:%sys-execv cmd argv)
-		  #+sbcl(sb-ext:quit :unix-status 1))
-		(progn
-		  (isys:%sys-close child-in)
-		  (isys:%sys-close child-out)
-		  (isys:%sys-close child-err)
-		  (make-process-pipe :pid pid
-				     :alivep t
-				     :input-fd parent-out
-				     :output-fd parent-in
-				     :error-fd parent-err))))))))))
+	  (with-foreign-argv (argv (cons cmd args))
+	    (let ((pid (isys:%sys-fork)))
+	      (if (zerop pid)
+		  (progn
+		    (bindfd 0 child-in parent-out)
+		    (bindfd 1 child-out parent-in)
+		    (bindfd 3 child-err parent-err)
+		    (isys:%sys-execv cmd argv)
+		    #+sbcl(sb-ext:quit :unix-status 1))
+		  (progn
+		    (isys:%sys-close child-in)
+		    (isys:%sys-close child-out)
+		    (isys:%sys-close child-err)
+		    (make-process-pipe :pid pid
+				       :alivep t
+				       :input-fd parent-out
+				       :output-fd parent-in
+				       :error-fd parent-err))))))))))
 
 (defun run-ffmpeg-pipe (&rest ffmpeg-cmd-initargs)
   (let* ((ffmpeg-cmd (apply #'make-ffmpeg-cmd ffmpeg-cmd-initargs))
@@ -169,8 +169,11 @@
 	(isys:%sys-kill pid 15)	;term
 	(isys:%sys-kill pid 9)	;and finally kill
 	(isys:%sys-waitpid pid (cffi:null-pointer) 1) ;TODO - write path for iolib.syscalls
+	(sleep 1)				      ;dump with-timeout alternative
 	(isys:%sys-waitpid pid (cffi:null-pointer) 1))
-    ((or isys:echild isys:esrch) (c) (declare (ignorable c)) t)))
+    ((or isys:echild isys:esrch) (c) (declare (ignorable c))
+     (setf (process-pipe-alivep process-pipe) nil)
+     process-pipe)))
 
 (defmacro with-process-pipe ((process-pipe cmd args) &body body)
   `(let ((,process-pipe (run-process-pipe ,cmd ,args)))
