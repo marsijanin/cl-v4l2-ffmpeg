@@ -72,7 +72,6 @@
 	(with-process-pipe (ffmpeg  "/usr/bin/ffmpeg" args)
 	  (format t "Runing \"ffmpeg ~{~a ~}\"" args)
 	  (setf *ffmpeg-pipe* ffmpeg)
-
 	  (do-frames (frame buff v4l2
 			    :end-test-form *cap-thread-stop*
 			    :return-form (format t "cap thread exit~%"))
@@ -80,7 +79,7 @@
 			     (second buff)
 			     wxh3)
 	    (bt:with-lock-held (*camera-data-lock*)
-	      (fast-v4l2-rgb-buffer->argb-texture buff *camera-data* wxh))
+	      (fast-v4l2-rgb-buffer->argb-texture (second buff) *camera-data* wxh))
 	    (when *camera-widget*
 	      (gtk:with-main-loop
 		(gtk:widget-queue-draw *camera-widget*)))))))))
