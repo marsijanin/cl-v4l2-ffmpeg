@@ -19,7 +19,8 @@
   (defparameter *render-thread-stop* (bt:make-condition-variable))
   (defparameter *render-thread-lock* (bt:make-lock "Render thread lock"))
 
-  (defparameter *ffmpeg-pipe* nil)) ;</ eval-when >
+  (defparameter *ffmpeg-pipe0* nil)
+  (defparameter *ffmpeg-pipe1* nil)) ;</ eval-when >
 
 (defmacro without-errors (&body body)
   `(handler-case (progn ,@body)
@@ -66,20 +67,29 @@
 	      w h s (format-string p))
       (let ((wxh (* w h))
 	    (wxh3 (* w h 3))
-	    (args (ffmpeg-args (make-ffmpeg-cmd :input-width w
-						:input-height h
-						:out "video.mpg"))))
-	(with-process-pipe (ffmpeg  "/usr/bin/ffmpeg" args)
-	  (format t "Runing \"ffmpeg ~{~a ~}\"" args)
-	  (setf *ffmpeg-pipe* ffmpeg)
+	    (args0 (ffmpeg-args (make-ffmpeg-cmd :input-width w
+						 :input-height h
+						 :out "video0.mpg")))
+	    (args1 (ffmpeg-args (make-ffmpeg-cmd :input-width w
+						 :input-height h
+						 :out "video1.mpg")))
+	    selection)
+	(with-process-pipes ((ffmpeg0  "/usr/bin/ffmpeg" args0)
+			     (ffmpeg1  "/usr/bin/ffmpeg" args1))
+	  (format t "Runing \"ffmpeg ~{~a ~}\"" args0)
+	  (format t "Runing \"ffmpeg ~{~a ~}\"" args1)
+	  (setf *ffmpeg-pipe0* ffmpeg0)
+	  (setf *ffmpeg-pipe1* ffmpeg1)
 	  (do-frames (frame buff v4l2
 			    :end-test-form *cap-thread-stop*
 			    :return-form (format t "cap thread exit~%"))
-	    (isys:%sys-write (process-pipe-input-fd ffmpeg)
+	    (isys:%sys-write (process-pipe-input-fd (if selection ffmpeg0 ffmpeg1))
 			     (second buff)
 			     wxh3)
 	    (bt:with-lock-held (*camera-data-lock*)
 	      (fast-v4l2-rgb-buffer->argb-texture (second buff) *camera-data* wxh))
+	    #|cameras switching commands here|#
+	    (setf selection (if selection nil t))
 	    (when *camera-widget*
 	      (gtk:with-main-loop
 		(gtk:widget-queue-draw *camera-widget*)))))))))
