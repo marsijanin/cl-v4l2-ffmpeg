@@ -1,18 +1,9 @@
 (eval-when (:load-toplevel :compile-toplevel)
-  (defvar *capture-device* "/dev/video0")
+  (defstruct glframe widget data (lock (bt:make-lock)))
+  (defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
   (defparameter *v4l2* nil)
 
-  ;; what we want from camera
-  (defvar *want-width* 352)
-  (defvar *want-height* 288)
-
-  ;; what we really get
-  (defparameter *got-width* nil)
-  (defparameter *got-height* nil)
-
-  (defparameter *camera-widget* nil)
-  (defparameter *camera-data* nil)
-  (defparameter *camera-data-lock* (bt:make-lock "Camera data lock"))
+  (defparameter *glframe* (make-glframe))
 
   (defparameter *cap-thread-stop* nil)
 
@@ -52,27 +43,23 @@
 
 (defun capture-thread ()
   (format t "cap thread start~%")
-  (with-v4l2 (v4l2 *capture-device*
-		   :w *want-width*
-		   :h *want-height*)
-    (with-slots ((w v4l2:width) (h v4l2:height) (s v4l2:sizeimage) (p v4l2:pixelformat))
-	(v4l2:format-pix (v4l2:get-image-format (v4l2-fd v4l2)))
+  (with-v4l2 (v4l2 (v4l2-path *want-v4l2*)
+		   :w (v4l2-w *want-v4l2*)
+		   :h (v4l2-h *want-v4l2*))
+    (with-slots (w h size format) v4l2
       (setf *v4l2* v4l2
-	    *got-width* w
-	    *got-height* h
-	    *camera-data* (make-array (* h w 4)
+	    (glframe-data *glframe*) (make-array (* h w 4)
 				      :element-type '(unsigned-byte 8)
 				      :initial-element #xff))
       (format t "got ~Dx~D size ~D, format ~S~%"
-	      w h s (format-string p))
-      (let ((wxh (* w h))
-	    (wxh3 (* w h 3))
-	    (args0 (ffmpeg-args (make-ffmpeg-cmd :input-width w
+	      w h size (format-string format))
+      (let ((args0 (ffmpeg-args (make-ffmpeg-cmd :input-width w
 						 :input-height h
 						 :out "video0.mpg")))
 	    (args1 (ffmpeg-args (make-ffmpeg-cmd :input-width w
 						 :input-height h
 						 :out "video1.mpg")))
+	    (lock (glframe-lock *glframe*))
 	    selection)
 	(with-process-pipes ((ffmpeg0  "/usr/bin/ffmpeg" args0)
 			     (ffmpeg1  "/usr/bin/ffmpeg" args1))
@@ -85,14 +72,14 @@
 			    :return-form (format t "cap thread exit~%"))
 	    (isys:%sys-write (process-pipe-input-fd (if selection ffmpeg0 ffmpeg1))
 			     (second buff)
-			     wxh3)
-	    (bt:with-lock-held (*camera-data-lock*)
-	      (fast-v4l2-rgb-buffer->argb-texture (second buff) *camera-data* wxh))
+			     size)
+	    (bt:with-lock-held (lock)
+	      (fast-v4l2-rgb-buffer->argb-texture (second buff) (glframe-data *glframe*) (* w h)))
 	    #|cameras switching commands here|#
 	    (setf selection (if selection nil t))
-	    (when *camera-widget*
+	    (when (glframe-widget *glframe*)
 	      (gtk:with-main-loop
-		(gtk:widget-queue-draw *camera-widget*)))))))))
+		(gtk:widget-queue-draw (glframe-widget *glframe*))))))))))
 
 (defun camera-init (widget)
   (declare (ignore widget))
@@ -105,23 +92,23 @@
   (gl:tex-image-2d :texture-rectangle-arb
 		   0
 		   :rgb8
-		   *got-width*
-		   *got-height*
+		   (v4l2-w *v4l2*)
+		   (v4l2-h *v4l2*)
 		   0
 		   :rgba
 		   :unsigned-byte
-		   *camera-data*)
+		   (glframe-data *glframe*))
 
   (gl:new-list 1 :compile)
 
   (gl:begin :quads)
-  (gl:tex-coord 0 *got-height*)
+  (gl:tex-coord 0 (v4l2-h *v4l2*))
   (gl:vertex 0.0 0.0)
   (gl:tex-coord 0 0)
   (gl:vertex 0.0 1.0)
-  (gl:tex-coord *got-width* 0)
+  (gl:tex-coord (v4l2-w *v4l2*) 0)
   (gl:vertex 1.0 1.0)
-  (gl:tex-coord *got-width* *got-height*)
+  (gl:tex-coord (v4l2-w *v4l2*) (v4l2-h *v4l2*))
   (gl:vertex 1.0 0.0)
   (gl:end)
   (gl:end-list)
@@ -134,15 +121,16 @@
   (gl:clear :color-buffer-bit :depth-buffer-bit)
   (gl:bind-texture :texture-rectangle-arb 0)
 
-  (when *camera-data*
-    (bt:with-lock-held (*camera-data-lock*)
-      (gl:tex-sub-image-2d :texture-rectangle-arb 0
-			   0 0
-			   *got-width*
-			   *got-height*
-			   :rgba
-			   :unsigned-byte
-			   *camera-data*)))
+  (when (glframe-data *glframe*)
+    (let ((lock (glframe-lock *glframe*)))
+      (bt:with-lock-held (lock)
+	(gl:tex-sub-image-2d :texture-rectangle-arb 0
+			     0 0
+			     (v4l2-w *v4l2*)
+			     (v4l2-h *v4l2*)
+			     :rgba
+			     :unsigned-byte
+			     (glframe-data *glframe*)))))
 
   ;; Keep ratio 4:3
   (multiple-value-bind (w h)
@@ -180,8 +168,8 @@
 				   :type :toplevel
 				   :window-position :center
 				   :title "Hello world!"
-				   :default-width *got-width*
-				   :default-height *got-height*))
+				   :default-width (v4l2-w *v4l2*)
+				   :default-height (v4l2-h *v4l2*)))
 	    (hbox (make-instance 'gtk:h-box))
 	    (vbox (make-instance 'gtk:v-box))
 	    (quit-button (make-instance 'gtk:button :label "Quit")))
@@ -195,11 +183,11 @@
 				  (bt:condition-notify *render-thread-stop*)))
 
 ;; Capture process needs to know which widget to ask for redraw
-	(setq *camera-widget* (make-instance 'gtkglext:gl-drawing-area
+	(setf (glframe-widget *glframe*) (make-instance 'gtkglext:gl-drawing-area
 					     :on-init #'camera-init
 					     :on-expose #'camera-draw))
 	(gtk:box-pack-start hbox vbox :expand nil)
-	(gtk:box-pack-start hbox *camera-widget* :expand t)
+	(gtk:box-pack-start hbox (glframe-widget *glframe*) :expand t)
 	(gtk:box-pack-start vbox quit-button :expand nil)
 	(gtk:container-add window hbox)
 	(gtk:widget-show window :all t)))
