@@ -3,23 +3,32 @@
   `(handler-case (progn ,@body)
      (error (,condition) (format t "~A~%" ,condition)))))
 
-
 (defstruct v4l2
-  fd buffers format openp)
+  fd buffers format w h size path openp)
 
 (defun open-v4l2 (path &key (w 640) (h 480) (pixformat v4l2:pix-fmt-rgb24) (n-buffs 4))
-  (let* ((fd    (isys:%sys-open path isys:o-rdwr))
-	 (fmt   (v4l2:set-image-format fd w h pixformat))
-	 (buffs (v4l2:map-buffers fd n-buffs)))
-    (v4l2:stream-on fd buffs)
-    (make-v4l2 :fd fd :buffers buffs :format fmt :openp t)))
+  (let ((fd (isys:%sys-open path isys:o-rdwr)))
+    (v4l2:set-image-format fd w h pixformat)
+    (let ((buffs (v4l2:map-buffers fd n-buffs)))
+      (v4l2:stream-on fd buffs)
+      (with-slots ((w v4l2:width) (h v4l2:height) (size v4l2:sizeimage) (fmt v4l2:pixelformat))
+	  (v4l2:format-pix (v4l2:get-image-format fd))
+	(make-v4l2 :fd fd :buffers buffs :format fmt :path path
+		   :w w :h h :size size :openp t)))))
 
 (defun close-v4l2 (v4l2)
-  (v4l2:stream-off    (v4l2-fd v4l2))
-  (v4l2:unmap-buffers (v4l2-buffers v4l2))
-  (isys:%sys-close    (v4l2-fd v4l2))
-  (setf (v4l2-openp v4l2) nil)
-  v4l2)
+  (with-slots (fd buffers format w h size openp)
+      v4l2
+    (when openp
+      (v4l2:stream-off fd)
+      (when buffers
+	(v4l2:unmap-buffers buffers)
+	(setf buffers nil))
+      (when fd
+	(isys:%sys-close fd)
+	(setf fd nil))
+      (setf openp nil))
+      v4l2))
 
 (defmacro with-v4l2 ((v4l2-var path &key
 			       (w 640) (h 480) (pixformat v4l2:pix-fmt-rgb24) (n-buffs 4))
