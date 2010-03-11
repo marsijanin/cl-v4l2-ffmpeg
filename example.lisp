@@ -32,7 +32,7 @@
 	   (type (simple-array (unsigned-byte 8) (*)) texture)
 	   (type (integer 0 #.array-dimension-limit) size))
   (dotimes (i size)
-    (declare (type (integer 0 #.array-dimension-limit) size))
+    (declare (type (integer 0 #.array-dimension-limit) i))
     (let ((r (cffi:mem-aref buff :uchar (+ (* 3 i) 0)))
 	  (g (cffi:mem-aref buff :uchar (+ (* 3 i) 1)))
 	  (b (cffi:mem-aref buff :uchar (+ (* 3 i) 2))))
