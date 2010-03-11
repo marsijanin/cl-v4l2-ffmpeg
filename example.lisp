@@ -1,5 +1,11 @@
+;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl --load example.lisp
 ;; some example of the usage cl-v4l2 with ffmpeg
 ;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(mapcar #'(lambda (asdf) (asdf:oos 'asdf:load-op asdf))
+	'(:cl-ffmpeg :cl-gtk2-gtkglext))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(use-package :ffmpeg)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; using defstruct nstead of defclass for simplify for now
 ;; 'case thre is no inheritance
@@ -9,51 +15,6 @@
   (lock (bt:make-lock))	      ;data lock
   ffmpeg-cmd 		      ;ffmpeg parameters (output format etc.)
   ffmpeg-pipe)		      ;ffmpeg process
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun process-frameshow (frameshow v4l2 frame-n)
-  "Process frameshow instance:
-   - send current frame data (frame-n'th of the buffers of the v4l2 instance)
-     to the ffmpeg process;
-   - update widget data and queue widget to redraw."
-  (with-slots (ffmpeg-pipe data widget lock) frameshow
-    (with-slots ((fd input-fd)) ffmpeg-pipe
-      (with-slots (buffers size w h) v4l2
-	(let ((buffer (second (nth frame-n buffers))))
-	  ;; send current v4l2 frame buffer data to the ffmpeg pipe
-	  ;; (if there is some)
-	  (when ffmpeg-pipe
-	    (isys:%sys-write fd buffer size))
-	  ;; convert current v4l2 framen data to the widget format
-	  ;; (if there is some)
-	  (when data
-	    (bt:with-lock-held (lock)
-	      (fast-v4l2-rgb-buffer->argb-texture buffer data (* w h))))
-	  ;; redraw widget (if there is some)
-	  (when widget
-	    (gtk:with-main-loop
-	      (gtk:widget-queue-draw widget))))))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; some stuff from cl-v4l2 example:
-(defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
-(defparameter *v4l2* nil)
-
-(defparameter *frameshow*
-  (make-frameshow :ffmpeg-cmd (make-ffmpeg-cmd :out "out.mpg")))
-
-(defparameter *cap-thread-stop* nil)
-
-(defparameter *render-thread-stop* (bt:make-condition-variable))
-(defparameter *render-thread-lock* (bt:make-lock "Render thread lock"))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun char-at (pos data)
-  (code-char (ldb (byte 8 (* 8 pos)) data)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun format-string (pixfmt)
-  (format nil "~C~C~C~C"
-	  (char-at 0 pixfmt)
-	  (char-at 1 pixfmt)
-	  (char-at 2 pixfmt)
-	  (char-at 3 pixfmt)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun fast-v4l2-rgb-buffer->argb-texture (buff texture size)
   (declare (optimize (speed 3) (debug 0) (safety 0))
@@ -69,32 +30,79 @@
 	    (aref texture (+ (* 4 i) 1)) g
 	    (aref texture (+ (* 4 i) 2)) b))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun process-frameshow (frameshow v4l2 frame-n)
+  "Process frameshow instance:
+   - send current frame data (frame-n'th of the buffers of the v4l2 instance)
+     to the ffmpeg process;
+   - update widget data and queue widget to redraw."
+  (with-accessors ((pipe frameshow-ffmpeg-pipe) (data frameshow-data)
+		   (widget frameshow-widget) (lock frameshow-lock)) frameshow
+    (with-accessors ((fd process-pipe-input-fd)) pipe
+      (with-accessors ((buffers v4l2-buffers) (size v4l2-size)
+		       (w v4l2-w) (h v4l2-h)) v4l2
+	(let ((buffer (second (nth frame-n buffers))))
+	  ;; send current v4l2 frame buffer data to the ffmpeg pipe
+	  ;; (if there is some)
+	  (when pipe
+	    (isys:%sys-write fd buffer size))
+	  ;; convert current v4l2 framen data to the widget format
+	  ;; (if there is some)
+	  (when data
+	    (bt:with-lock-held (lock)
+	      (fast-v4l2-rgb-buffer->argb-texture buffer data (* w h))))
+	  ;; redraw widget (if there is some)
+	  (when widget
+	    (gtk:with-main-loop
+	      (gtk:widget-queue-draw widget))))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; some stuff from cl-v4l2 example:
+(defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
+(defparameter *v4l2* nil)
+(defparameter *frameshow*
+  (make-frameshow :ffmpeg-cmd (make-ffmpeg-cmd :out "out.mpg")))
+(defparameter *cap-thread-stop* nil)
+(defparameter *render-thread-stop* (bt:make-condition-variable))
+(defparameter *render-thread-lock* (bt:make-lock "Render thread lock"))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun char-at (pos data)
+  (code-char (ldb (byte 8 (* 8 pos)) data)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun format-string (pixfmt)
+  (format nil "~C~C~C~C"
+	  (char-at 0 pixfmt)
+	  (char-at 1 pixfmt)
+	  (char-at 2 pixfmt)
+	  (char-at 3 pixfmt)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun capture-thread ()
   (format t "cap thread start~%")
   (with-v4l2 (v4l2 (v4l2-path *want-v4l2*)
 		   :w (v4l2-w *want-v4l2*)
 		   :h (v4l2-h *want-v4l2*))
-    (with-slots (w h size format) v4l2
-      (with-slots (ffmpeg-pipe ffmpeg-cmd data) *frameshow*
+    (with-accessors ((w v4l2-w) (h v4l2-h)
+		     (size v4l2-size) (format v4l2-format)) v4l2
+      (with-accessors ((pipe frameshow-ffmpeg-pipe) (cmd frameshow-ffmpeg-cmd)
+		       (data frameshow-data)) *frameshow*
 	(setf *v4l2* v4l2
 	      data
 	      (make-array (* h w 4)
 			  :element-type '(unsigned-byte 8)
 			  :initial-element #xff))
-	(when ffmpeg-cmd
-	  (with-slots (input-width input-height) ffmpeg-cmd
-	    (setf input-height h
-		  input-width  w
-		  ffmpeg-pipe  (run-ffmpeg-pipe ffmpeg-cmd))))
+	(when cmd
+	  (with-accessors ((ffmpeg-iw ffmpeg-cmd-input-width)
+			   (ffmpeg-ih ffmpeg-cmd-input-height)) cmd
+	    (setf ffmpeg-ih h
+		  ffmpeg-iw  w
+		  pipe  (run-ffmpeg-pipe cmd))))
 	(format t "got ~Dx~D size ~D, format ~S~%"
 		w h size (format-string format))
 	(do-frames (frame v4l2
 			  :end-test-form *cap-thread-stop*
 			  :return-form (format t "cap thread exit~%"))
 	  (process-frameshow *frameshow* v4l2 frame))
-	(when ffmpeg-pipe
-	  (kill-process-pipe ffmpeg-pipe)
-	  (setf ffmpeg-pipe nil))))))
+	(when pipe
+	  (kill-process-pipe pipe)
+	  (setf pipe nil))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   (declare (ignore widget))
@@ -214,3 +222,4 @@
     (setq *cap-thread-stop* t)
     (bt:join-thread cap-thread)))
 
+(test)

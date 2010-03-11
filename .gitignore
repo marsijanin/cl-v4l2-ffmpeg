@@ -2,3 +2,5 @@ sbcl-*-*-*
 ccl-*-*-*
 clisp-*-*-*
 *~
+*.fasl
+*.mpg
