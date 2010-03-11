@@ -34,17 +34,16 @@
 	      (gtk:widget-queue-draw widget))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; some stuff from cl-v4l2 example:
-(eval-when (:load-toplevel :compile-toplevel)
-  (defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
-  (defparameter *v4l2* nil)
+(defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
+(defparameter *v4l2* nil)
 
-  (defparameter *frameshow* (make-frameshow))
+(defparameter *frameshow*
+  (make-frameshow :ffmpeg-cmd (make-ffmpeg-cmd :out "out.mpg")))
 
-  (defparameter *cap-thread-stop* nil)
+(defparameter *cap-thread-stop* nil)
 
-  (defparameter *render-thread-stop* (bt:make-condition-variable))
-  (defparameter *render-thread-lock* (bt:make-lock "Render thread lock")))
-;; </ eval-when >
+(defparameter *render-thread-stop* (bt:make-condition-variable))
+(defparameter *render-thread-lock* (bt:make-lock "Render thread lock"))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun char-at (pos data)
   (code-char (ldb (byte 8 (* 8 pos)) data)))
@@ -76,20 +75,26 @@
 		   :w (v4l2-w *want-v4l2*)
 		   :h (v4l2-h *want-v4l2*))
     (with-slots (w h size format) v4l2
-      (setf *v4l2* v4l2
-	    (frameshow-data *frameshow*)
-	    (make-array (* h w 4)
-			:element-type '(unsigned-byte 8)
-			:initial-element #xff))
-      (format t "got ~Dx~D size ~D, format ~S~%"
-	      w h size (format-string format))
-      (do-frames (frame v4l2
-			:end-test-form *cap-thread-stop*
-			:return-form (format t "cap thread exit~%"))
-	(process-frameshow *frameshow* v4l2 frame))
-      (with-slots ((ffmpeg ffmpeg-pipe)) *frameshow*
-	(when ffmpeg
-	  (kill-process-pipe ffmpeg))))))
+      (with-slots (ffmpeg-pipe ffmpeg-cmd data) *frameshow*
+	(setf *v4l2* v4l2
+	      data
+	      (make-array (* h w 4)
+			  :element-type '(unsigned-byte 8)
+			  :initial-element #xff))
+	(when ffmpeg-cmd
+	  (with-slots (input-width input-height) ffmpeg-cmd
+	    (setf input-height h
+		  input-width  w
+		  ffmpeg-pipe  (run-ffmpeg-pipe ffmpeg-cmd))))
+	(format t "got ~Dx~D size ~D, format ~S~%"
+		w h size (format-string format))
+	(do-frames (frame v4l2
+			  :end-test-form *cap-thread-stop*
+			  :return-form (format t "cap thread exit~%"))
+	  (process-frameshow *frameshow* v4l2 frame))
+	(when ffmpeg-pipe
+	  (kill-process-pipe ffmpeg-pipe)
+	  (setf ffmpeg-pipe nil))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   (declare (ignore widget))
