@@ -1,32 +1,61 @@
+;; some example of the usage cl-v4l2 with ffmpeg
+;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; using defstruct nstead of defclass for simplify for now
+;; 'case thre is no inheritance
+(defstruct frameshow	      ;structure for representign captured v4l2 frame
+  widget		      ;widget there frame will be shown
+  data			      ;frame data in RGBA format
+  (lock (bt:make-lock))	      ;data lock
+  ffmpeg-cmd 		      ;ffmpeg parameters (output format etc.)
+  ffmpeg-pipe)		      ;ffmpeg process
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun process-frameshow (frameshow v4l2 frame-n)
+  "Process frameshow instance:
+   - send current frame data (frame-n'th of the buffers of the v4l2 instance)
+     to the ffmpeg process;
+   - update widget data and queue widget to redraw."
+  (with-slots (ffmpeg-pipe data widget lock) frameshow
+    (with-slots ((fd input-fd)) ffmpeg-pipe
+      (with-slots (buffers size w h) v4l2
+	(let ((buffer (second (nth frame-n buffers))))
+	  ;; send current v4l2 frame buffer data to the ffmpeg pipe
+	  ;; (if there is some)
+	  (when ffmpeg-pipe
+	    (isys:%sys-write fd buffer size))
+	  ;; convert current v4l2 framen data to the widget format
+	  ;; (if there is some)
+	  (when data
+	    (bt:with-lock-held (lock)
+	      (fast-v4l2-rgb-buffer->argb-texture buffer data (* w h))))
+	  ;; redraw widget (if there is some)
+	  (when widget
+	    (gtk:with-main-loop
+	      (gtk:widget-queue-draw widget))))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; some stuff from cl-v4l2 example:
 (eval-when (:load-toplevel :compile-toplevel)
-  (defstruct glframe widget data (lock (bt:make-lock)))
   (defparameter *want-v4l2* (make-v4l2 :path "/dev/video0" :w 352 :h 288))
   (defparameter *v4l2* nil)
 
-  (defparameter *glframe* (make-glframe))
+  (defparameter *frameshow* (make-frameshow))
 
   (defparameter *cap-thread-stop* nil)
 
   (defparameter *render-thread-stop* (bt:make-condition-variable))
-  (defparameter *render-thread-lock* (bt:make-lock "Render thread lock"))
-
-  (defparameter *ffmpeg-pipe0* nil)
-  (defparameter *ffmpeg-pipe1* nil)) ;</ eval-when >
-
-(defmacro without-errors (&body body)
-  `(handler-case (progn ,@body)
-     (error (c) (format t "suppressed error: ~A~%" c) nil)))
-
+  (defparameter *render-thread-lock* (bt:make-lock "Render thread lock")))
+;; </ eval-when >
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun char-at (pos data)
   (code-char (ldb (byte 8 (* 8 pos)) data)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun format-string (pixfmt)
   (format nil "~C~C~C~C"
 	  (char-at 0 pixfmt)
 	  (char-at 1 pixfmt)
 	  (char-at 2 pixfmt)
 	  (char-at 3 pixfmt)))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun fast-v4l2-rgb-buffer->argb-texture (buff texture size)
   (declare (optimize (speed 3) (debug 0) (safety 0))
 	   (type (simple-array (unsigned-byte 8) (*)) texture)
@@ -40,7 +69,7 @@
       (setf (aref texture (+ (* 4 i) 0)) r
 	    (aref texture (+ (* 4 i) 1)) g
 	    (aref texture (+ (* 4 i) 2)) b))))
-
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun capture-thread ()
   (format t "cap thread start~%")
   (with-v4l2 (v4l2 (v4l2-path *want-v4l2*)
@@ -48,39 +77,20 @@
 		   :h (v4l2-h *want-v4l2*))
     (with-slots (w h size format) v4l2
       (setf *v4l2* v4l2
-	    (glframe-data *glframe*) (make-array (* h w 4)
-				      :element-type '(unsigned-byte 8)
-				      :initial-element #xff))
+	    (frameshow-data *frameshow*)
+	    (make-array (* h w 4)
+			:element-type '(unsigned-byte 8)
+			:initial-element #xff))
       (format t "got ~Dx~D size ~D, format ~S~%"
 	      w h size (format-string format))
-      (let ((args0 (ffmpeg-args (make-ffmpeg-cmd :input-width w
-						 :input-height h
-						 :out "video0.mpg")))
-	    (args1 (ffmpeg-args (make-ffmpeg-cmd :input-width w
-						 :input-height h
-						 :out "video1.mpg")))
-	    (lock (glframe-lock *glframe*))
-	    selection)
-	(with-process-pipes ((ffmpeg0  "/usr/bin/ffmpeg" args0)
-			     (ffmpeg1  "/usr/bin/ffmpeg" args1))
-	  (format t "Runing \"ffmpeg ~{~a ~}\"" args0)
-	  (format t "Runing \"ffmpeg ~{~a ~}\"" args1)
-	  (setf *ffmpeg-pipe0* ffmpeg0)
-	  (setf *ffmpeg-pipe1* ffmpeg1)
-	  (do-frames (frame buff v4l2
-			    :end-test-form *cap-thread-stop*
-			    :return-form (format t "cap thread exit~%"))
-	    (isys:%sys-write (process-pipe-input-fd (if selection ffmpeg0 ffmpeg1))
-			     (second buff)
-			     size)
-	    (bt:with-lock-held (lock)
-	      (fast-v4l2-rgb-buffer->argb-texture (second buff) (glframe-data *glframe*) (* w h)))
-	    #|cameras switching commands here|#
-	    (setf selection (if selection nil t))
-	    (when (glframe-widget *glframe*)
-	      (gtk:with-main-loop
-		(gtk:widget-queue-draw (glframe-widget *glframe*))))))))))
-
+      (do-frames (frame v4l2
+			:end-test-form *cap-thread-stop*
+			:return-form (format t "cap thread exit~%"))
+	(process-frameshow *frameshow* v4l2 frame))
+      (with-slots ((ffmpeg ffmpeg-pipe)) *frameshow*
+	(when ffmpeg
+	  (kill-process-pipe ffmpeg))))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   (declare (ignore widget))
   (gl:clear-color 0.8 0.8 0.8 0.8)
@@ -97,7 +107,7 @@
 		   0
 		   :rgba
 		   :unsigned-byte
-		   (glframe-data *glframe*))
+		   (frameshow-data *frameshow*))
 
   (gl:new-list 1 :compile)
 
@@ -121,8 +131,8 @@
   (gl:clear :color-buffer-bit :depth-buffer-bit)
   (gl:bind-texture :texture-rectangle-arb 0)
 
-  (when (glframe-data *glframe*)
-    (let ((lock (glframe-lock *glframe*)))
+  (when (frameshow-data *frameshow*)
+    (let ((lock (frameshow-lock *frameshow*)))
       (bt:with-lock-held (lock)
 	(gl:tex-sub-image-2d :texture-rectangle-arb 0
 			     0 0
@@ -130,7 +140,7 @@
 			     (v4l2-h *v4l2*)
 			     :rgba
 			     :unsigned-byte
-			     (glframe-data *glframe*)))))
+			     (frameshow-data *frameshow*)))))
 
   ;; Keep ratio 4:3
   (multiple-value-bind (w h)
@@ -182,17 +192,18 @@
 				  (declare (ignore widget))
 				  (bt:condition-notify *render-thread-stop*)))
 
-;; Capture process needs to know which widget to ask for redraw
-	(setf (glframe-widget *glframe*) (make-instance 'gtkglext:gl-drawing-area
-					     :on-init #'camera-init
-					     :on-expose #'camera-draw))
+	;; Capture process needs to know which widget to ask for redraw
+	(setf (frameshow-widget *frameshow*)
+	      (make-instance 'gtkglext:gl-drawing-area
+			     :on-init #'camera-init
+			     :on-expose #'camera-draw))
 	(gtk:box-pack-start hbox vbox :expand nil)
-	(gtk:box-pack-start hbox (glframe-widget *glframe*) :expand t)
+	(gtk:box-pack-start hbox (frameshow-widget *frameshow*) :expand t)
 	(gtk:box-pack-start vbox quit-button :expand nil)
 	(gtk:container-add window hbox)
 	(gtk:widget-show window :all t)))
 
-;; Wait for window destruction
+    ;; Wait for window destruction
     (bt:with-lock-held (*render-thread-lock*)
       (bt:condition-wait *render-thread-stop* *render-thread-lock*))
     (setq *cap-thread-stop* t)

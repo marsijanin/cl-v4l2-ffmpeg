@@ -66,37 +66,35 @@
 	  (progn ,@body)
        (close-v4l2 ,v4l2-var))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmacro do-frames ((frame-var buffer-var v4l2
+(defmacro do-frames ((frame-var v4l2
 				&key user-vars end-test-form return-form)
 		     &body body)
   "Iteration macro for v4l2 devices around `do*` macro.
    Execute `body` each time call `v4l2:get-frame` was successful and until
    `end-test-form` is T, and call `v4l2:put-frame` after executing `body`.
-   Binds `frame-var` to the current frame number (`v4l2:get-frame`),
-   `buffer-var` to the current (frame-var'th) element of the v4l2 device
-   buffers list. Additional variables can be specified via `user-vars`.
+   Binds `frame-var` to the current frame number (`v4l2:get-frame`).
+   Additional variables can be specified via `user-vars`.
    Return `end-test-form` at the end.
 
    Example:
-   (do-frames (frame buff v4l2
+   (do-frames (frame v4l2
                      :user-vars((cnt 0 (1+ cnt)))
                      :end-test-form (> cnt 10)
                      :return-form t)
-     (isys:%sys-write dest-fd (second buff) (v4l2-size v4l2)))
+     (isys:%sys-write dest-fd (second (nth frame (v4l2-buff v4l2)))
+                              (v4l2-size v4l2)))
   "
-  (alexandria:with-gensyms (fd buffs)
+  (let ((fd (gensym "fd")))
     `(do* ((,fd (v4l2-fd ,v4l2))
-	   (,buffs (v4l2-buffers ,v4l2))
 	   (,frame-var (w/o-errors (v4l2:get-frame ,fd))
 		       (w/o-errors (v4l2:get-frame ,fd)))
-	   (,buffer-var (when ,frame-var (nth ,frame-var ,buffs)))
 	   ,@user-vars)
 	  (,end-test-form ,return-form)
        (when ,frame-var
 	 ,@body
 	 (v4l2:put-frame ,fd ,frame-var)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmacro with-v4l2-do-frames ((v4l2-var frame-var buffs-var path
+(defmacro with-v4l2-do-frames ((v4l2-var frame-var path
 					 &key (w 640) (h 480)
 					 (pixformat v4l2:pix-fmt-rgb24)
 					 (n-buffs 4)
@@ -107,7 +105,7 @@
 			 :h ,h
 			 :pixformat ,pixformat
 			 :n-buffs ,n-buffs)
-     (do-frames (,frame-var ,buffs-var ,v4l2-var
+     (do-frames (,frame-var ,v4l2-var
 			    :user-vars ,user-vars
 			    :end-test-form ,end-test-form
 			    :return-form ,return-form)
