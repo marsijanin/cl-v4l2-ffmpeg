@@ -5,5 +5,8 @@
   :author "Nikolay V. Razbegaev <marsijanin@gmail.com>"
   :licence "Not decide yet" 
   :depends-on (:cl-v4l2)
-  :components ((:file "ffmpeg")))
+  :serial t
+  :components ((:file "package")
+               (:file "ffmpeg")))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; EOF

@@ -2,6 +2,8 @@
 ;; (cl-v4l2 example application)
 ;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(in-package :cl-ffmpeg)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmacro w/o-errors (&body body)
   "Like `ignore-errors`, but also print ignored condition"
   (let ((condition (gensym "condition")))
