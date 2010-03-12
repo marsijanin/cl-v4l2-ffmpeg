@@ -1,11 +1,17 @@
-;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl --load example.lisp
 ;; some example of the usage cl-v4l2 with ffmpeg
 ;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
+;; Launching:
+;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl \
+;; --load example.lisp                            \
+;; --eval "(ffmpeg-example:test)"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (mapcar #'(lambda (asdf) (asdf:oos 'asdf:load-op asdf))
 	'(:cl-ffmpeg :cl-gtk2-gtkglext))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(use-package :ffmpeg)
+(defpackage :ffmpeg-example
+  (:use :common-lisp :ffmpeg)
+  (:export #:test))
+(in-package :ffmpeg-example)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; using defstruct nstead of defclass for simplify for now
 ;; 'case thre is no inheritance
@@ -92,13 +98,13 @@
 	  (with-accessors ((ffmpeg-iw ffmpeg-cmd-input-width)
 			   (ffmpeg-ih ffmpeg-cmd-input-height)) cmd
 	    (setf ffmpeg-ih h
-		  ffmpeg-iw  w
-		  pipe  (run-ffmpeg-pipe cmd))))
+		  ffmpeg-iw w
+		  pipe      (run-ffmpeg-pipe cmd))))
 	(format t "got ~Dx~D size ~D, format ~S~%"
 		w h size (format-string format))
 	(do-frames (frame v4l2
 			  :end-test-form *cap-thread-stop*
-			  :return-form (format t "cap thread exit~%"))
+			  :return-form   (format t "cap thread exit~%"))
 	  (process-frameshow *frameshow* v4l2 frame))
 	(when pipe
 	  (kill-process-pipe pipe)
@@ -222,4 +228,3 @@
     (setq *cap-thread-stop* t)
     (bt:join-thread cap-thread)))
 
-(test)
