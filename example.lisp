@@ -121,12 +121,13 @@
 				    (switching-result (funcall switch) (funcall switch)))
 			:end-test-form *cap-thread-stop*
 			:return-form
-			(dotimes (i fragments-ln)
-			  (with-accessors ((pipe frameshow-ffmpeg-pipe))
-			      (aref mosaic i)
-			    (when pipe
-			      (kill-process-pipe pipe))
-			    (format t "cap thread exit~%"))))
+			(progn
+			  (dotimes (i fragments-ln)
+			    (with-accessors ((pipe frameshow-ffmpeg-pipe))
+				(aref mosaic i)
+			      (when pipe
+				(kill-process-pipe pipe))))
+			  (format t "cap thread exit~%")))
 	(unless switching-result
 	  (format t "Switching camera failed!~%"))
 	(process-frameshow fragment frame))))
@@ -261,7 +262,7 @@
 	     :type :toplevel
 	     :window-position :center
 	     :title "Camera"
-	     :default-width (v4l2-w v4l2)
+	     :default-width (* (v4l2-w v4l2) n) ;TODO: frames layouter
 	     :default-height (v4l2-h v4l2)
 	     (gtk:h-box :var hbox))
 	  (let ((m (make-array n)))
@@ -279,7 +280,10 @@
 								:input-height (v4l2-h v4l2))
 				   ;; Camera switching commoand here
 				   :camera-switcher #'(lambda ()
-							(format t "Switching to camera ~d" i))
+							(format t
+								"Switching to camera ~d~%"
+								i)
+							t) ;i.e. switching OK
 				   :on-init #'camera-init
 				   :on-expose #'camera-draw))
 	      (gtk:box-pack-start hbox (aref m i)))
