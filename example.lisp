@@ -22,7 +22,21 @@
    (ffmpeg-pipe :accessor frameshow-ffmpeg-pipe :initform nil))
   (:metaclass gobject:gobject-class)
   #|(:default-initargs :on-init #'camera-init :on-expose #'camera-draw)|#)
-;; TODO after method for (setf frameshow-ffmpeg-cmd) that restrt ffmpeg-pipe
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun restart-frameshow-ffmpeg (frameshow cmd)
+  (with-accessors ((pipe frameshow-ffmpeg-pipe)) frameshow
+    (when pipe
+      (kill-process-pipe pipe))
+    (setf pipe (run-ffmpeg-pipe cmd))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defmethod (setf frameshow-ffmpeg-cmd)
+    :after ((frameshow frameshow) (cmd ffmpeg-cmd))
+  (restart-frameshow-ffmpeg frameshow cmd))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defmethod shared-initialize :after ((instance frameshow) slot-names
+				      &rest initargs &key ffmpeg-cmd)
+  (declare (ignorable slot-names initargs))
+  (restart-frameshow-ffmpeg instance ffmpeg-cmd))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun fast-v4l2-rgb-buffer->argb-texture (buff texture size)
   (declare (optimize (speed 3) (debug 0) (safety 0))
@@ -79,7 +93,11 @@
       (format t "cap thread start~%")
       (do-frames (frame (frameshow-v4l2 frameshow)
 			:end-test-form *cap-thread-stop*
-			:return-form   (format t "cap thread exit~%"))
+			:return-form
+			(progn
+			  (when (frameshow-ffmpeg-pipe frameshow)
+			    (kill-process-pipe (frameshow-ffmpeg-pipe frameshow)))
+			  (format t "cap thread exit~%")))
 	(process-frameshow frameshow frame))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
@@ -155,7 +173,8 @@
       (gl:call-list 1)
       (gl:flush))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun test (&key (v4l2-path "/dev/video0") (want-width 352) (want-height 288))
+(defun test (&key (v4l2-path "/dev/video0") (want-width 352) (want-height 288)
+	     (ffmpeg-cmd (make-ffmpeg-cmd :out "out.mpg")))
   (with-v4l2 (v4l2 v4l2-path :w want-width :h want-height)
     (let ((render-thread-stop (bt:make-condition-variable))
 	  (render-thread-lock (bt:make-lock "Render thread lock"))
@@ -175,6 +194,7 @@
 				:element-type '(unsigned-byte 8)
 				:initial-element #xff)
 	      :v4l2 v4l2
+	      :ffmpeg-cmd ffmpeg-cmd
 	      :on-init #'camera-init
 	      :on-expose #'camera-draw))
 	  (when *cap-thread-stop*
