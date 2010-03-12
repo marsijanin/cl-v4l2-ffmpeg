@@ -174,7 +174,7 @@
       (gl:flush))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test (&key (v4l2-path "/dev/video0") (want-width 352) (want-height 288)
-	     (ffmpeg-cmd (make-ffmpeg-cmd :out "out.mpg")))
+	     (file "out.mpg"))
   (with-v4l2 (v4l2 v4l2-path :w want-width :h want-height)
     (let ((render-thread-stop (bt:make-condition-variable))
 	  (render-thread-lock (bt:make-lock "Render thread lock"))
@@ -194,7 +194,9 @@
 				:element-type '(unsigned-byte 8)
 				:initial-element #xff)
 	      :v4l2 v4l2
-	      :ffmpeg-cmd ffmpeg-cmd
+	      :ffmpeg-cmd (make-ffmpeg-cmd :out file
+					   :input-width (v4l2-w v4l2)
+					   :input-height (v4l2-h v4l2))
 	      :on-init #'camera-init
 	      :on-expose #'camera-draw))
 	  (when *cap-thread-stop*
