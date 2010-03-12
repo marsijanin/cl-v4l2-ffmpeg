@@ -123,15 +123,17 @@
   (input-pix-fmt "rgb24")
   (input-format "rawvideo")
   (output-format "mpeg")
-  input-frame-rate output-frame-rate)
+  (overwrite-out t)
+  input-frame-rate
+  output-frame-rate)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun ffmpeg-args (ffmpeg-cmd)
   "Return list of the ffmpeg arguments, i.e. convert ffmpeg arguments
    from struct `ffmpeg-cmd` form in to the form what can be passed to
    `sb-ext:run-program`."
   (with-slots (in input-format input-width input-height input-pix-fmt
-		  input-frame-rate
-		  output-format output-with output-height output-frame-rate out)
+		  input-frame-rate output-format output-with output-height
+		  output-frame-rate out overwrite-out)
       ffmpeg-cmd
     (append (list "-f" input-format)
 	    (list "-s" (format nil "~Dx~D" input-width input-height))
@@ -145,6 +147,8 @@
 	      (list "-s" (format nil "~Dx~D" output-with output-height)))
 	    (when output-frame-rate
 	      (list "-r" output-frame-rate))
+	    (when overwrite-out
+	      (list "-y"))
 	    (list out))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun argv-to-foreign (argv)
@@ -212,18 +216,28 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun kill-process-pipe (process-pipe)
   "Trying to kill process."
-  (handler-case
-      (with-slots (pid) process-pipe
-	(isys:%sys-kill pid 15)	;term
-	(isys:%sys-kill pid 15)	;term
-	(isys:%sys-kill pid 9)	;and finally kill
-	;; TODO - write path for iolib.syscalls
-	(isys:%sys-waitpid pid (cffi:null-pointer) 1)
-	(sleep 1)			;dump with-timeout alternative
-	(isys:%sys-waitpid pid (cffi:null-pointer) 1))
-    ((or isys:echild isys:esrch) (c) (declare (ignorable c))
-     (setf (process-pipe-alivep process-pipe) nil)
-     process-pipe)))
+  (with-accessors ((pid process-pipe-pid) (in process-pipe-input-fd)
+		   (out process-pipe-output-fd) (err process-pipe-error-fd)
+		   (alivep process-pipe-alivep)) process-pipe
+    (handler-case
+	(progn
+	  (isys:%sys-kill pid 15)	;term
+	  (isys:%sys-kill pid 15)	;term
+	  (isys:%sys-kill pid 9)	;and finally kill
+	  ;; TODO - write path for iolib.syscalls
+	  (isys:%sys-waitpid pid (cffi:null-pointer) 1)
+	  (sleep 1)			;dump with-timeout alternative
+	  (isys:%sys-waitpid pid (cffi:null-pointer) 1))
+      ((or isys:echild isys:esrch) (c)
+	(declare (ignorable c))
+       (isys:%sys-close in)
+       (isys:%sys-close out)
+       (isys:%sys-close err)
+       (setf alivep nil
+	     in nil
+	     out nil
+	     err nil)
+       process-pipe))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmacro with-process-pipe ((process-pipe cmd args) &body body)
   "with-* macro for running process."
