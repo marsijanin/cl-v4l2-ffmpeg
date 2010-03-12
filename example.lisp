@@ -4,13 +4,15 @@
 ;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl \
 ;; --load example.lisp                            \
 ;; --eval "(ffmpeg-example:test)"
+;; for multiple cameras on one v4l2 device example:
+;; --eval "(ffmpeg-example:test-mosaic 2)"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (mapcar #'(lambda (asdf) (asdf:oos 'asdf:load-op asdf))
 	'(:cl-ffmpeg :cl-gtk2-gtkglext))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defpackage :ffmpeg-example
   (:use :common-lisp :ffmpeg)
-  (:export #:test))
+  (:export #:test #:test-mosaic))
 (in-package :ffmpeg-example)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defclass frameshow (gtkglext:gl-drawing-area)
@@ -99,6 +101,35 @@
 			    (kill-process-pipe (frameshow-ffmpeg-pipe frameshow)))
 			  (format t "cap thread exit~%")))
 	(process-frameshow frameshow frame))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defclass mosaic-fragment (frameshow)
+  ((camera-switcher :reader mosaic-fragment-camera-switcher
+		   :initarg :camera-switcher))
+  (:metaclass gobject:gobject-class))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun make-capture-thread-fn-mosaic (mosaic)
+  #'(lambda ()
+      (format t "cap thread start~%")
+      (do-frames (frame (frameshow-v4l2 (aref mosaic 0))
+			:user-vars ((fragments-ln (length mosaic))
+				    (ref 0 (mod (1+ ref) fragments-ln))
+				    (fragment (aref mosaic ref) (aref mosaic ref))
+				    ;; If we will be call switchers inside `do-frames`
+				    ;; we will be switch camera _only when_
+				    ;; `v4l2:get-frame` call will be successful
+				    (switch (mosaic-fragment-camera-switcher fragment))
+				    (switching-result (funcall switch) (funcall switch)))
+			:end-test-form *cap-thread-stop*
+			:return-form
+			(dotimes (i fragments-ln)
+			  (with-accessors ((pipe frameshow-ffmpeg-pipe))
+			      (aref mosaic i)
+			    (when pipe
+			      (kill-process-pipe pipe))
+			    (format t "cap thread exit~%"))))
+	(unless switching-result
+	  (format t "Switching camera failed!~%"))
+	(process-frameshow fragment frame))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   "Modified camera initialisation function from cl-v4l2 example."
@@ -216,5 +247,58 @@
       (setq *cap-thread-stop* t)
       (bt:join-thread capturer)
       t)))				;just return something
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
+		    (want-height 288) (prefix "camera"))
+  (with-v4l2 (v4l2 v4l2-path :w want-width :h want-height)
+    (let ((render-thread-stop (bt:make-condition-variable))
+	  (render-thread-lock (bt:make-lock "Render thread lock"))
+	  mosaic capturer)
+      (gtk:within-main-loop
+	(gtk:let-ui
+	    (gtk:gtk-window
+	     :var win
+	     :type :toplevel
+	     :window-position :center
+	     :title "Camera"
+	     :default-width (v4l2-w v4l2)
+	     :default-height (v4l2-h v4l2)
+	     (gtk:h-box :var hbox))
+	  (let ((m (make-array n)))
+	    (dotimes (i n)
+	      (setf (aref m i)
+		    (make-instance 'mosaic-fragment
+				   :data (make-array (* (v4l2-h v4l2) (v4l2-w v4l2) 4)
+						     :element-type '(unsigned-byte 8)
+						     :initial-element #xff)
+				   :v4l2 v4l2
+				   :ffmpeg-cmd (make-ffmpeg-cmd :out (format nil
+									     "~a~d.mpg"
+									     prefix i)
+								:input-width (v4l2-w v4l2)
+								:input-height (v4l2-h v4l2))
+				   ;; Camera switching commoand here
+				   :camera-switcher #'(lambda ()
+							(format t "Switching to camera ~d" i))
+				   :on-init #'camera-init
+				   :on-expose #'camera-draw))
+	      (gtk:box-pack-start hbox (aref m i)))
+	  (when *cap-thread-stop*
+	    (setf *cap-thread-stop* nil))
+	  (setf mosaic m)
+	  (gobject:connect-signal win "destroy"
+				  #'(lambda (widget)
+				      (declare (ignorable widget))
+				      (bt:condition-notify render-thread-stop)))
+	  (gtk:widget-show win))))	; </within-main-loop> !!!
+      (sleep 1)
+      (setf capturer (bt:make-thread (make-capture-thread-fn-mosaic mosaic)
+				     :name "capturer"))
+      ;; Wait for window destruction
+      (bt:with-lock-held (render-thread-lock)
+	(bt:condition-wait render-thread-stop render-thread-lock))
+      (setq *cap-thread-stop* t)
+      (bt:join-thread capturer)
+      t)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EOF
