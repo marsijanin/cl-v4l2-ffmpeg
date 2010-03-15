@@ -1,9 +1,10 @@
-;; some useful macros for working with cl-v4l2 and ffmpeg
-;; (cl-v4l2 example application)
-;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
+;;; some useful macros for working with cl-v4l2 and ffmpeg
+;;; (cl-v4l2 example application)
+;;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (in-package :cl-ffmpeg)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; <v4l2 syntax shugar>
 (defmacro w/o-errors (&body body)
   "Like `ignore-errors`, but also print ignored condition"
   (let ((condition (gensym "condition")))
@@ -112,45 +113,9 @@
 			    :end-test-form ,end-test-form
 			    :return-form ,return-form)
        ,@body)))
+;;; </v4l2 syntax shugar>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defstruct ffmpeg-cmd
-  stream
-  (in "-")
-  (out "-")
-  (input-width 600)
-  (input-height 480)
-  output-with output-height
-  (input-pix-fmt "rgb24")
-  (input-format "rawvideo")
-  (output-format "mpeg")
-  (overwrite-out t)
-  input-frame-rate
-  output-frame-rate)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun ffmpeg-args (ffmpeg-cmd)
-  "Return list of the ffmpeg arguments, i.e. convert ffmpeg arguments
-   from struct `ffmpeg-cmd` form in to the form what can be passed to
-   `sb-ext:run-program`."
-  (with-slots (in input-format input-width input-height input-pix-fmt
-		  input-frame-rate output-format output-with output-height
-		  output-frame-rate out overwrite-out)
-      ffmpeg-cmd
-    (append (list "-f" input-format)
-	    (list "-s" (format nil "~Dx~D" input-width input-height))
-	    (list "-pix_fmt" input-pix-fmt)
-	    (when input-frame-rate
-	      (list "-r" input-frame-rate))
-	    (list "-i" in)
-	    (when output-format
-	      (list "-f" output-format))
-	    (when (and output-with output-height)
-	      (list "-s" (format nil "~Dx~D" output-with output-height)))
-	    (when output-frame-rate
-	      (list "-r" output-frame-rate))
-	    (when overwrite-out
-	      (list "-y"))
-	    (list out))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; <fork(3p) + execv(3p) wrappers>
 (defun argv-to-foreign (argv)
   "Convert `argv` from list of the lisp strings in to the
    array of the C strings (for the `isys:%sys-execv`)"
@@ -253,6 +218,46 @@
 	 (with-process-pipes ,(cdr binds)
 	   ,@body))
       `(progn ,@body)))
+;;; <fork(3p) + execv(3p) wrappers>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; <ffmpeg wrappers>
+(defstruct ffmpeg-cmd
+  stream
+  (in "-")
+  (out "-")
+  (input-width 600)
+  (input-height 480)
+  output-with output-height
+  (input-pix-fmt "rgb24")
+  (input-format "rawvideo")
+  (output-format "mpeg")
+  (overwrite-out t)
+  input-frame-rate
+  output-frame-rate)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun ffmpeg-args (ffmpeg-cmd)
+  "Return list of the ffmpeg arguments, i.e. convert ffmpeg arguments
+   from struct `ffmpeg-cmd` form in to the form what can be passed to
+   `sb-ext:run-program`."
+  (with-slots (in input-format input-width input-height input-pix-fmt
+		  input-frame-rate output-format output-with output-height
+		  output-frame-rate out overwrite-out)
+      ffmpeg-cmd
+    (append (list "-f" input-format)
+	    (list "-s" (format nil "~Dx~D" input-width input-height))
+	    (list "-pix_fmt" input-pix-fmt)
+	    (when input-frame-rate
+	      (list "-r" input-frame-rate))
+	    (list "-i" in)
+	    (when output-format
+	      (list "-f" output-format))
+	    (when (and output-with output-height)
+	      (list "-s" (format nil "~Dx~D" output-with output-height)))
+	    (when output-frame-rate
+	      (list "-r" output-frame-rate))
+	    (when overwrite-out
+	      (list "-y"))
+	    (list out))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun run-ffmpeg-pipe (ffmpeg-cmd)
   "Run ffmpeg with ffmpeg-cmd arguments
@@ -274,5 +279,6 @@
 	 (with-ffmpeg-pipes ,(cdr binds)
 	   ,@body))
       `(progn ,@body)))
+;;; </ffmpeg wrappers>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; EOF
+;;; EOF
