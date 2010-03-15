@@ -281,4 +281,29 @@
       `(progn ,@body)))
 ;;; </ffmpeg wrappers>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; <frames processing clos stuff>
+(defclass framesprocessor ()
+  ((v4l2 :initarg :v4l2 :reader framesprocessor-v4l2)
+   (ffmpeg-cmd :accessor framesprocessor-ffmpeg-cmd :initform nil
+	       :initarg :ffmpeg-cmd)
+   (ffmpeg-pipe :accessor framesprocessor-ffmpeg-pipe :initform nil)))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; Launching ffmpeg after instance creation and relaunching after command
+;; changing via `:after` methods
+(defun restart-framesprocessor-ffmpeg (frameshow cmd)
+  (with-accessors ((pipe framesprocessor-ffmpeg-pipe)) frameshow
+    (when pipe
+      (kill-process-pipe pipe))
+    (setf pipe (run-ffmpeg-pipe cmd))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defmethod (setf framesprocessor-ffmpeg-cmd)
+    :after ((framesprocessor framesprocessor) (cmd ffmpeg-cmd))
+  (restart-framesprocessor-ffmpeg framesprocessor cmd))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defmethod shared-initialize :after ((instance framesprocessor) slot-names
+				      &rest initargs &key ffmpeg-cmd)
+  (declare (ignorable slot-names initargs))
+  (restart-framesprocessor-ffmpeg instance ffmpeg-cmd))
+;;; </frames processing clos stuff>
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; EOF

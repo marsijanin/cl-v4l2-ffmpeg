@@ -1,11 +1,11 @@
-;; some example of the usage cl-v4l2 with ffmpeg
-;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
-;; Launching:
-;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl \
-;; --load example.lisp                            \
-;; --eval "(ffmpeg-example:test)"
-;; for multiple cameras on one v4l2 device example:
-;; --eval "(ffmpeg-example:test-mosaic 2)"
+;;; some example of the usage cl-v4l2 with ffmpeg
+;;; Copyright 2010 Nikolay V. Razbegaev <marsijanin@gmail.com>
+;;; Launching:
+;;; LD_PRELOAD=/usr/lib/libv4l/v4l2convert.so sbcl \
+;;; --load example.lisp                            \
+;;; --eval "(ffmpeg-example:test)"
+;;; for multiple cameras on one v4l2 device example:
+;;; --eval "(ffmpeg-example:test-mosaic 2)"
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (mapcar #'(lambda (asdf) (asdf:oos 'asdf:load-op asdf))
 	'(:cl-ffmpeg :cl-gtk2-gtkglext))
@@ -15,30 +15,12 @@
   (:export #:test #:test-mosaic))
 (in-package :ffmpeg-example)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defclass frameshow (gtkglext:gl-drawing-area)
+(defclass frameshow (gtkglext:gl-drawing-area framesprocessor)
   ((data :initform nil :type (or null (simple-array (unsigned-byte 8) (*)))
 	 :accessor frameshow-data :initarg :data)
-   (lock :initform (bt:make-lock) :accessor frameshow-lock)
-   (v4l2 :initarg :v4l2 :reader frameshow-v4l2)
-   (ffmpeg-cmd :accessor frameshow-ffmpeg-cmd :initform nil :initarg :ffmpeg-cmd)
-   (ffmpeg-pipe :accessor frameshow-ffmpeg-pipe :initform nil))
+   (lock :initform (bt:make-lock) :accessor frameshow-lock))
   (:metaclass gobject:gobject-class)
   #|(:default-initargs :on-init #'camera-init :on-expose #'camera-draw)|#)
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun restart-frameshow-ffmpeg (frameshow cmd)
-  (with-accessors ((pipe frameshow-ffmpeg-pipe)) frameshow
-    (when pipe
-      (kill-process-pipe pipe))
-    (setf pipe (run-ffmpeg-pipe cmd))))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmethod (setf frameshow-ffmpeg-cmd)
-    :after ((frameshow frameshow) (cmd ffmpeg-cmd))
-  (restart-frameshow-ffmpeg frameshow cmd))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmethod shared-initialize :after ((instance frameshow) slot-names
-				      &rest initargs &key ffmpeg-cmd)
-  (declare (ignorable slot-names initargs))
-  (restart-frameshow-ffmpeg instance ffmpeg-cmd))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun fast-v4l2-rgb-buffer->argb-texture (buff texture size)
   (declare (optimize (speed 3) (debug 0) (safety 0))
@@ -59,8 +41,8 @@
    - send current frame data (frame-n'th of the buffers of the v4l2 instance)
      to the ffmpeg process;
    - update widget data and queue widget to redraw."
-  (with-accessors ((pipe frameshow-ffmpeg-pipe) (data frameshow-data)
-		   (lock frameshow-lock) (v4l2 frameshow-v4l2)) frameshow
+  (with-accessors ((pipe framesprocessor-ffmpeg-pipe) (data frameshow-data)
+		   (lock frameshow-lock) (v4l2 framesprocessor-v4l2)) frameshow
     (with-accessors ((fd process-pipe-input-fd)) pipe
       (with-accessors ((buffers v4l2-buffers) (size v4l2-size)
 		       (w v4l2-w) (h v4l2-h)) v4l2
@@ -93,12 +75,12 @@
 (defun make-capture-thread-fn (frameshow)
   #'(lambda ()
       (format t "cap thread start~%")
-      (do-frames (frame (frameshow-v4l2 frameshow)
+      (do-frames (frame (framesprocessor-v4l2 frameshow)
 			:end-test-form *cap-thread-stop*
 			:return-form
 			(progn
-			  (when (frameshow-ffmpeg-pipe frameshow)
-			    (kill-process-pipe (frameshow-ffmpeg-pipe frameshow)))
+			  (when (framesprocessor-ffmpeg-pipe frameshow)
+			    (kill-process-pipe (framesprocessor-ffmpeg-pipe frameshow)))
 			  (format t "cap thread exit~%")))
 	(process-frameshow frameshow frame))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -110,20 +92,26 @@
 (defun make-capture-thread-fn-mosaic (mosaic)
   #'(lambda ()
       (format t "cap thread start~%")
-      (do-frames (frame (frameshow-v4l2 (aref mosaic 0))
-			:user-vars ((fragments-ln (length mosaic))
-				    (ref 0 (mod (1+ ref) fragments-ln))
-				    (fragment (aref mosaic ref) (aref mosaic ref))
-				    ;; If we will be call switchers inside `do-frames`
-				    ;; we will be switch camera _only when_
-				    ;; `v4l2:get-frame` call will be successful
-				    (switch (mosaic-fragment-camera-switcher fragment))
-				    (switching-result (funcall switch) (funcall switch)))
-			:end-test-form *cap-thread-stop*
+      (do-frames (frame (framesprocessor-v4l2 (aref mosaic 0))
+			:user-vars
+			((fragments-ln (length mosaic))
+			 (ref 0 (mod (1+ ref) fragments-ln))
+			 (fragment (aref mosaic ref) (aref mosaic ref))
+			 ;; If we will be call switchers inside
+			 ;; `do-frames` we will be switch camera
+			 ;; _only when_  `v4l2:get-frame` call
+			 ;; will be successful
+			 (switch
+			     (mosaic-fragment-camera-switcher fragment))
+			 (switching-result
+			  (funcall switch)
+			  (funcall switch)))
+			:end-test-form
+			*cap-thread-stop*
 			:return-form
 			(progn
 			  (dotimes (i fragments-ln)
-			    (with-accessors ((pipe frameshow-ffmpeg-pipe))
+			    (with-accessors ((pipe framesprocessor-ffmpeg-pipe))
 				(aref mosaic i)
 			      (when pipe
 				(kill-process-pipe pipe))))
@@ -134,7 +122,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   "Modified camera initialisation function from cl-v4l2 example."
-  (with-accessors ((v4l2 frameshow-v4l2) (data frameshow-data)) widget
+  (with-accessors ((v4l2 framesprocessor-v4l2) (data frameshow-data)) widget
     (with-accessors ((w v4l2-w) (h v4l2-h)) v4l2
       (gl:clear-color 0.8 0.8 0.8 0.8)
       (gl:enable :texture-rectangle-arb :depth-test)
@@ -167,7 +155,7 @@
 (defun camera-draw (widget event)
   "Modified camera (re)drawind function from cl-v4l2 example."
   (declare (ignorable event))
-  (with-accessors ((v4l2 frameshow-v4l2) (data frameshow-data)
+  (with-accessors ((v4l2 framesprocessor-v4l2) (data frameshow-data)
 		   (lock frameshow-lock)) widget
     (with-accessors ((w v4l2-w) (h v4l2-h)) v4l2
       (gl:clear :color-buffer-bit :depth-buffer-bit)

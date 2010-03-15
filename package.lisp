@@ -58,6 +58,11 @@
    ;; run-ffmpeg-pipe
    #:run-ffmpeg-pipe
    #:with-ffmpeg-pipe
-   #:with-ffmpeg-pipes))
+   #:with-ffmpeg-pipes
+   ;; CLOS stuff
+   #:framesprocessor
+   #:framesprocessor-ffmpeg-cmd
+   #:framesprocessor-ffmpeg-pipe
+   #:framesprocessor-v4l2))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; EOF
