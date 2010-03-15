@@ -237,11 +237,17 @@
       (bt:join-thread capturer)
       t)))				;just return something
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun displace-array->vector (array)
+  (make-array (array-total-size array)
+	      :element-type (array-element-type array)
+	      :displaced-to array))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-mosaic-fragments (n v4l2 &optional (prefix "camera"))
   ;; should be called inside `gtk:within-main-loop`
-  (let ((m (make-array n)))
-    (dotimes (i n m)
-      (setf (aref m i)
+  (let* ((m (make-array n))
+	 (d (displace-array->vector m)))
+    (dotimes (i (length d) m)
+      (setf (aref d i)
 	    (make-instance 'mosaic-fragment
 			   :data
 			   (make-array (* (v4l2-h v4l2) (v4l2-w v4l2) 4)
@@ -262,14 +268,18 @@
 			   :on-init #'camera-init
 			   :on-expose #'camera-draw)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun displace-array->vector (array)
-  (make-array (array-total-size array)
-	      :element-type (array-element-type array)
-	      :displaced-to array))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun place-mosaic-fragments (fragments table)
-  (dotimes (i (length (displace-array->vector fragments)))
-    (gtk:table-attach table (aref fragments i) i (+ i 1) 0 1)))
+  (typecase fragments
+    (vector
+     (dotimes (i (length fragments))
+       (gtk:table-attach table (aref fragments i) i (+ i 1) 0 1)))
+    ((array * (* *))
+     (let ((dims (array-dimensions fragments)))
+     (dotimes (i (first dims))
+       (dotimes (j (second dims))
+	 (gtk:table-attach table (aref fragments i j) j (+ j 1) i (+ i 1))))))
+    (array (error "Can't place 3D array on 2D table!"))
+    (t (error "Fragments should be vector or 2D array"))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
 		    (want-height 288) (prefix "camera"))
@@ -284,13 +294,15 @@
 	     :type :toplevel
 	     :window-position :center
 	     :title "Camera"
-	     :default-width (* (v4l2-w v4l2) n) ;TODO: frames layouter
+	     :default-width (v4l2-w v4l2)
 	     :default-height (v4l2-h v4l2)
 	     (gtk:table :var tab))
-	  (let ((m (make-mosaic-fragments n v4l2  prefix)))
+	  (let ((m (make-mosaic-fragments (if (<= n 2) n (list (/ n 2) 2))
+					  v4l2
+					  prefix)))
 	    (when *cap-thread-stop*
 	      (setf *cap-thread-stop* nil))
-	    (setf mosaic m)
+	    (setf mosaic (displace-array->vector m))
 	    (place-mosaic-fragments m tab)
 	    (gobject:connect-signal win "destroy"
 				    #'(lambda (widget)
