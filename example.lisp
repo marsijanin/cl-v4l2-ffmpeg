@@ -237,6 +237,32 @@
       (bt:join-thread capturer)
       t)))				;just return something
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun make-and-place-mosaic-fragments (n v4l2 box &key (prefix "camera"))
+  ;; should be called inside `gtk:within-main-loop`
+  (let ((m (make-array n)))
+    (dotimes (i n m)
+      (setf (aref m i)
+	    (make-instance 'mosaic-fragment
+			   :data
+			   (make-array (* (v4l2-h v4l2) (v4l2-w v4l2) 4)
+				       :element-type '(unsigned-byte 8)
+				       :initial-element #xff)
+			   :v4l2 v4l2
+			   :ffmpeg-cmd
+			   (make-ffmpeg-cmd :out (format nil
+							 "~a~d.mpg"
+							 prefix i)
+					    :input-width (v4l2-w v4l2)
+					    :input-height (v4l2-h v4l2))
+			   ;; Camera switching command here
+			   :camera-switcher
+			   #'(lambda ()
+			       (format t "Switching to camera ~d~%" i)
+			       t) ;i.e. switching OK
+			   :on-init #'camera-init
+			   :on-expose #'camera-draw))
+      (gtk:box-pack-start box (aref m i)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
 		    (want-height 288) (prefix "camera"))
   (with-v4l2 (v4l2 v4l2-path :w want-width :h want-height)
@@ -253,36 +279,15 @@
 	     :default-width (* (v4l2-w v4l2) n) ;TODO: frames layouter
 	     :default-height (v4l2-h v4l2)
 	     (gtk:h-box :var hbox))
-	  (let ((m (make-array n)))
-	    (dotimes (i n)
-	      (setf (aref m i)
-		    (make-instance 'mosaic-fragment
-				   :data (make-array (* (v4l2-h v4l2) (v4l2-w v4l2) 4)
-						     :element-type '(unsigned-byte 8)
-						     :initial-element #xff)
-				   :v4l2 v4l2
-				   :ffmpeg-cmd (make-ffmpeg-cmd :out (format nil
-									     "~a~d.mpg"
-									     prefix i)
-								:input-width (v4l2-w v4l2)
-								:input-height (v4l2-h v4l2))
-				   ;; Camera switching commoand here
-				   :camera-switcher #'(lambda ()
-							(format t
-								"Switching to camera ~d~%"
-								i)
-							t) ;i.e. switching OK
-				   :on-init #'camera-init
-				   :on-expose #'camera-draw))
-	      (gtk:box-pack-start hbox (aref m i)))
-	  (when *cap-thread-stop*
-	    (setf *cap-thread-stop* nil))
-	  (setf mosaic m)
-	  (gobject:connect-signal win "destroy"
-				  #'(lambda (widget)
-				      (declare (ignorable widget))
-				      (bt:condition-notify render-thread-stop)))
-	  (gtk:widget-show win))))	; </within-main-loop> !!!
+	  (let ((m (make-and-place-mosaic-fragments n v4l2 hbox :prefix prefix)))
+	    (when *cap-thread-stop*
+	      (setf *cap-thread-stop* nil))
+	    (setf mosaic m)
+	    (gobject:connect-signal win "destroy"
+				    #'(lambda (widget)
+					(declare (ignorable widget))
+					(bt:condition-notify render-thread-stop)))
+	    (gtk:widget-show win))))	; </within-main-loop> !!!
       (sleep 1)
       (setf capturer (bt:make-thread (make-capture-thread-fn-mosaic mosaic)
 				     :name "capturer"))
