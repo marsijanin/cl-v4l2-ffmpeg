@@ -237,7 +237,7 @@
       (bt:join-thread capturer)
       t)))				;just return something
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun make-and-place-mosaic-fragments (n v4l2 box &key (prefix "camera"))
+(defun make-mosaic-fragments (n v4l2 &optional (prefix "camera"))
   ;; should be called inside `gtk:within-main-loop`
   (let ((m (make-array n)))
     (dotimes (i n m)
@@ -260,8 +260,16 @@
 			       (format t "Switching to camera ~d~%" i)
 			       t) ;i.e. switching OK
 			   :on-init #'camera-init
-			   :on-expose #'camera-draw))
-      (gtk:box-pack-start box (aref m i)))))
+			   :on-expose #'camera-draw)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun displace-array->vector (array)
+  (make-array (array-total-size array)
+	      :element-type (array-element-type array)
+	      :displaced-to array))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun place-mosaic-fragments (fragments table)
+  (dotimes (i (length (displace-array->vector fragments)))
+    (gtk:table-attach table (aref fragments i) i (+ i 1) 0 1)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
 		    (want-height 288) (prefix "camera"))
@@ -278,11 +286,12 @@
 	     :title "Camera"
 	     :default-width (* (v4l2-w v4l2) n) ;TODO: frames layouter
 	     :default-height (v4l2-h v4l2)
-	     (gtk:h-box :var hbox))
-	  (let ((m (make-and-place-mosaic-fragments n v4l2 hbox :prefix prefix)))
+	     (gtk:table :var tab))
+	  (let ((m (make-mosaic-fragments n v4l2  prefix)))
 	    (when *cap-thread-stop*
 	      (setf *cap-thread-stop* nil))
 	    (setf mosaic m)
+	    (place-mosaic-fragments m tab)
 	    (gobject:connect-signal win "destroy"
 				    #'(lambda (widget)
 					(declare (ignorable widget))
