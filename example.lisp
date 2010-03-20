@@ -244,10 +244,9 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-mosaic-fragments (n v4l2 &optional (prefix "camera"))
   ;; should be called inside `gtk:within-main-loop`
-  (let* ((m (make-array n))
-	 (d (displace-array->vector m)))
-    (dotimes (i (length d) m)
-      (setf (aref d i)
+  (let* ((m (make-array n)))
+    (dotimes (i (length m) m)
+      (setf (aref m i)
 	    (make-instance 'mosaic-fragment
 			   :data
 			   (make-array (* (v4l2-h v4l2) (v4l2-w v4l2) 4)
@@ -268,24 +267,24 @@
 			   :on-init #'camera-init
 			   :on-expose #'camera-draw)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun place-mosaic-fragments (fragments table)
-  (typecase fragments
-    (vector
-     (dotimes (i (length fragments))
-       (gtk:table-attach table (aref fragments i) i (+ i 1) 0 1)))
-    ((array * (* *))
-     (let ((dims (array-dimensions fragments)))
-     (dotimes (i (first dims))
-       (dotimes (j (second dims))
-	 (gtk:table-attach table (aref fragments i j) j (+ j 1) i (+ i 1))))))
-    (array (error "Can't place 3D array on 2D table!"))
-    (t (error "Fragments should be vector or 2D array"))))
+(defun place-mosaic-fragments (fragments table &optional (per-column 2))
+  (let ((n (length fragments)))
+    (multiple-value-bind (q r) (ceiling n per-column)
+      (dotimes (i q)
+	(if (and (< i (- q 1)) (zerop r))
+	    (dotimes (j per-column)
+	      (gtk:table-attach table (aref fragments (+ (* i per-column j)))
+				i (+ i 1) j (+ j 1)))
+	    (dotimes (j (+ per-column r))
+	      (gtk:table-attach table (aref fragments (+ (* i per-column) j))
+				i (+ i 1) j (+ j 1))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
-		    (want-height 288) (prefix "camera"))
+		    (want-height 288) (prefix "camera") (per-column 2))
   (with-v4l2 (v4l2 v4l2-path :w want-width :h want-height)
     (let ((render-thread-stop (bt:make-condition-variable))
 	  (render-thread-lock (bt:make-lock "Render thread lock"))
+	  (r (ceiling n per-column))
 	  mosaic capturer)
       (gtk:within-main-loop
 	(gtk:let-ui
@@ -294,16 +293,14 @@
 	     :type :toplevel
 	     :window-position :center
 	     :title "Camera"
-	     :default-width (v4l2-w v4l2)
-	     :default-height (v4l2-h v4l2)
-	     (gtk:table :var tab))
-	  (let ((m (make-mosaic-fragments (if (<= n 2) n (list (/ n 2) 2))
-					  v4l2
-					  prefix)))
+	     :default-width (* (v4l2-w v4l2) per-column)
+	     :default-height (* (v4l2-h v4l2) r)
+	     (gtk:table :var tab :n-columns per-column :n-rows r))
+	  (let ((m (make-mosaic-fragments n v4l2 prefix)))
 	    (when *cap-thread-stop*
 	      (setf *cap-thread-stop* nil))
-	    (setf mosaic (displace-array->vector m))
-	    (place-mosaic-fragments m tab)
+	    (setf mosaic m)
+	    (place-mosaic-fragments m tab per-column)
 	    (gobject:connect-signal win "destroy"
 				    #'(lambda (widget)
 					(declare (ignorable widget))
