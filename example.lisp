@@ -261,23 +261,22 @@
 					    :input-height (v4l2-h v4l2))
 			   ;; Camera switching command here
 			   :camera-switcher
-			   #'(lambda ()
-			       (format t "Switching to camera ~d~%" i)
-			       t) ;i.e. switching OK
+			   (let ((msg (format nil "Switching to camera ~d~%" i)))
+			     #'(lambda ()
+				 (write-line msg)
+				 t)) ;i.e. switching OK
 			   :on-init #'camera-init
 			   :on-expose #'camera-draw)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun place-mosaic-fragments (fragments table &optional (per-column 2))
   (let ((n (length fragments)))
-    (multiple-value-bind (q r) (ceiling n per-column)
-      (dotimes (i q)
-	(if (and (< i (- q 1)) (zerop r))
-	    (dotimes (j per-column)
-	      (gtk:table-attach table (aref fragments (+ (* i per-column j)))
-				i (+ i 1) j (+ j 1)))
-	    (dotimes (j (+ per-column r))
-	      (gtk:table-attach table (aref fragments (+ (* i per-column) j))
-				i (+ i 1) j (+ j 1))))))))
+      (dotimes (i (ceiling n per-column))
+	(dotimes (j per-column)
+	  (let* ((idx (+ (* i per-column) j))
+		 (elt (ignore-errors (aref fragments idx))))
+	    (when elt
+	      (gtk:table-attach table elt
+				j (+ j 1) i (+ i 1))))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun test-mosaic (n &key (v4l2-path "/dev/video0") (want-width 352)
 		    (want-height 288) (prefix "camera") (per-column 2))
