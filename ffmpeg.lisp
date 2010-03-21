@@ -12,7 +12,7 @@
        (error (,condition) (format t "~A~%" ,condition)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defstruct v4l2
-  fd buffers format w h size path stram-on-p)
+  fd buffers format w h size path stream-on-p)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun open-v4l2 (path &key (w 640) (h 480) (pixformat v4l2:pix-fmt-rgb24)
 		  (n-buffs 4))
@@ -36,18 +36,19 @@
 			 (fmt v4l2:pixelformat))
 		(v4l2:format-pix (v4l2:get-image-format fd))
 	      (make-v4l2 :fd fd :buffers buffs :format fmt :path path
-			 :w w :h h :size size :stram-on-p t))))
-      (error ()
-	(when fd (isys:%sys-close fd))))))
+			 :w w :h h :size size :stream-on-p t))))
+      (error (c)
+	(when fd (isys:%sys-close fd))
+	(error c)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun close-v4l2 (v4l2)
   "Trying to stop streaming action of the v4l2 device,
    unmap it's buffers and to close it."
   ;; I'm not using `with-slots` macro 'case some strange
   ;; sbcl warnings about `SB-PCL::SLOT-ACCESSOR`
-  (when (v4l2-stram-on-p v4l2)
+  (when (v4l2-stream-on-p v4l2)
       (v4l2:stream-off (v4l2-fd v4l2))
-      (setf (v4l2-stram-on-p v4l2) nil))
+      (setf (v4l2-stream-on-p v4l2) nil))
     (when (v4l2-buffers v4l2)
       (v4l2:unmap-buffers (v4l2-buffers v4l2))
       (setf (v4l2-buffers v4l2) nil))
