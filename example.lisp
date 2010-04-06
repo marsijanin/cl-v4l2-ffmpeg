@@ -50,7 +50,7 @@
 	  ;; send current v4l2 frame buffer data to the ffmpeg pipe
 	  ;; (if there is some)
 	  (when pipe
-	    (isys:%sys-write fd buffer size))
+	    (isys:write fd buffer size))
 	  ;; convert current v4l2 framen data to the widget format
 	  ;; and queue to redraw (if there is some)
 	  (when data

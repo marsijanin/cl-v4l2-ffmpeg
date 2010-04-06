@@ -23,7 +23,7 @@
    - `pixformat`: one of v4l2:pix-fmt-* constants;
    - `n-buffs`: number of the mapped v4l2 buffers.
    Return `v4l2` instance if success."
-  (let ((fd (isys:%sys-open path isys:o-rdwr)))
+  (let ((fd (isys:open path isys:o-rdwr)))
     ;; handler-case used in order to close v4l2 device
     ;; if there will be some errors during v4l2 setup
     ;; (try to set up unsupported format etc.)
@@ -38,7 +38,7 @@
 	      (make-v4l2 :fd fd :buffers buffs :format fmt :path path
 			 :w w :h h :size size :stream-on-p t))))
       (error (c)
-	(when fd (isys:%sys-close fd))
+	(when fd (isys:close fd))
 	(error c)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun close-v4l2 (v4l2)
@@ -53,7 +53,7 @@
       (v4l2:unmap-buffers (v4l2-buffers v4l2))
       (setf (v4l2-buffers v4l2) nil))
     (when (v4l2-fd v4l2)
-      (isys:%sys-close (v4l2-fd v4l2))
+      (isys:close (v4l2-fd v4l2))
       (setf (v4l2-fd v4l2) nil))
     v4l2)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -85,7 +85,7 @@
                      :user-vars((cnt 0 (1+ cnt)))
                      :end-test-form (> cnt 10)
                      :return-form t)
-     (isys:%sys-write dest-fd (second (nth frame (v4l2-buff v4l2)))
+     (isys:write dest-fd (second (nth frame (v4l2-buff v4l2)))
                               (v4l2-size v4l2)))
   "
   (let ((fd (gensym "fd")))
@@ -119,7 +119,7 @@
 ;;; <fork(3p) + execv(3p) wrappers>
 (defun argv-to-foreign (argv)
   "Convert `argv` from list of the lisp strings in to the
-   array of the C strings (for the `isys:%sys-execv`)"
+   array of the C strings (for the `isys:execv`)"
   (loop
      :with ln           := (+ (length argv) 1)
      :with foreign-argv := (cffi:foreign-alloc :pointer :count ln)
@@ -140,7 +140,7 @@
      :finally (cffi:foreign-free ptr)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmacro with-foreign-argv ((argv args) &body body)
-  "with-* macro for calling `isys:%sys-execv` "
+  "with-* macro for calling `isys:execv` "
   `(let ((,argv (argv-to-foreign ,args)))
      (unwind-protect (progn ,@body)
        (free-foreign-argv ,argv (+ (length ,args) 1)))))
@@ -149,31 +149,31 @@
   pid alivep input-fd output-fd error-fd)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun run-process-pipe (cmd args)
-  "Create a new process via `isys:%sys-execv`
+  "Create a new process via `isys:execv`
    and return corresponding `process-pipe` instance"
   (flet ((bindfd (fd child parent)
-	   (isys:%sys-close parent)
-	   (isys:%sys-dup2 child fd)
-	   (isys:%sys-close child)))
+	   (isys:close parent)
+	   (isys:dup2 child fd)
+	   (isys:close child)))
     (multiple-value-bind (child-in parent-out)
-	(isys:%sys-pipe)
+	(isys:pipe)
       (multiple-value-bind (parent-in child-out)
-	  (isys:%sys-pipe)
+	  (isys:pipe)
 	(multiple-value-bind (parent-err child-err)
-	    (isys:%sys-pipe)
+	    (isys:pipe)
 	  (with-foreign-argv (argv (cons cmd args))
-	    (let ((pid (isys:%sys-fork)))
+	    (let ((pid (isys:fork)))
 	      (if (zerop pid)
 		  (progn
 		    (bindfd 0 child-in parent-out)
 		    (bindfd 1 child-out parent-in)
 		    (bindfd 3 child-err parent-err)
-		    (isys:%sys-execv cmd argv)
+		    (isys:execv cmd argv)
 		    #+sbcl(sb-ext:quit :unix-status 1))
 		  (progn
-		    (isys:%sys-close child-in)
-		    (isys:%sys-close child-out)
-		    (isys:%sys-close child-err)
+		    (isys:close child-in)
+		    (isys:close child-out)
+		    (isys:close child-err)
 		    (make-process-pipe :pid pid
 				       :alivep t
 				       :input-fd parent-out
@@ -187,18 +187,18 @@
 		   (alivep process-pipe-alivep)) process-pipe
     (handler-case
 	(progn
-	  (isys:%sys-kill pid 15)	;term
-	  (isys:%sys-kill pid 15)	;term
-	  (isys:%sys-kill pid 9)	;and finally kill
+	  (isys:kill pid 15)	;term
+	  (isys:kill pid 15)	;term
+	  (isys:kill pid 9)	;and finally kill
 	  ;; TODO - write path for iolib.syscalls
-	  (isys:%sys-waitpid pid (cffi:null-pointer) 1)
+	  (isys:waitpid pid (cffi:null-pointer) 1)
 	  (sleep 1)			;dump with-timeout alternative
-	  (isys:%sys-waitpid pid (cffi:null-pointer) 1))
+	  (isys:waitpid pid (cffi:null-pointer) 1))
       ((or isys:echild isys:esrch) (c)
 	(declare (ignorable c))
-       (isys:%sys-close in)
-       (isys:%sys-close out)
-       (isys:%sys-close err)
+       (isys:close in)
+       (isys:close out)
+       (isys:close err)
        (setf alivep nil
 	     in nil
 	     out nil
