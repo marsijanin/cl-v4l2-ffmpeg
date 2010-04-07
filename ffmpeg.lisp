@@ -70,50 +70,63 @@
 	  (progn ,@body)
        (close-v4l2 ,v4l2-var))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmacro do-frames ((frame-var v4l2
-				&key user-vars end-test-form return-form)
-		     &body body)
+(defmacro do-frames ((frame-var v4l2 &key user-vars timer-var)
+		     &key capture-success-body capture-falure-body
+		     end-test-form return-form)
   "Iteration macro for v4l2 devices around `do*` macro.
-   Execute `body` each time call `v4l2:get-frame` was successful and until
-   `end-test-form` is T, and call `v4l2:put-frame` after executing `body`.
+   Execute `capture-success-body` each time call `v4l2:get-frame` was successful and until
+   `end-test-form` is T, and call `v4l2:put-frame` after executing `capture-success-body`.
+   Execute `capture-falure-body` if `v4l2:get-frame` call was not successful.
    Binds `frame-var` to the current frame number (`v4l2:get-frame`).
    Additional variables can be specified via `user-vars`.
    Return `end-test-form` at the end.
 
-   Example:
-   (do-frames (frame v4l2
-                     :user-vars((cnt 0 (1+ cnt)))
-                     :end-test-form (> cnt 10)
-                     :return-form t)
-     (isys:write dest-fd (second (nth frame (v4l2-buff v4l2)))
-                              (v4l2-size v4l2)))
+   Example (note double `((` around bodies) :
+    (do-frames (frm v4l2 :timer-var timer :user-vars ((cnt 0 (+ 1 cnt))))
+      :end-test-form (> cnt 10)
+      :capture-success-body ((format t \"Capturing frame in ~d~%\"
+                                     (float timer)))
+      :capture-falure-body  ((format t \"Capturing fallure!~%\"))
+      :return-form t)
   "
-  (let ((fd (gensym "fd")))
+  (alexandria:with-gensyms (fd before after)
     `(do* ((,fd (v4l2-fd ,v4l2))
+	   (,before (get-internal-real-time)
+		     (get-internal-real-time))
 	   (,frame-var (w/o-errors (v4l2:get-frame ,fd))
 		       (w/o-errors (v4l2:get-frame ,fd)))
+	   (,after (get-internal-real-time)
+		   (get-internal-real-time))
+	   (,timer-var (/ (- ,after ,before)
+			  internal-time-units-per-second)
+		       (/ (- ,after ,before)
+			  internal-time-units-per-second))
 	   ,@user-vars)
 	  (,end-test-form ,return-form)
-       (when ,frame-var
-	 ,@body
-	 (v4l2:put-frame ,fd ,frame-var)))))
+       (if ,frame-var
+	   (progn
+	     ,@capture-success-body
+	     (v4l2:put-frame ,fd ,frame-var))
+	   (progn ,@capture-falure-body)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defmacro with-v4l2-do-frames ((v4l2-var frame-var path
-					 &key (w 640) (h 480)
+(defmacro with-v4l2-do-frames ((v4l2-var frame-var path &key (w 640) (h 480)
 					 (pixformat v4l2:pix-fmt-rgb24)
 					 (n-buffs 4)
-					 user-vars end-test-form return-form)
-			       &body body)
+					 user-vars timer-var)
+			       &key capture-success-body capture-falure-body
+			       end-test-form return-form)
   "`with-v4l2` and `do-frames` macros combination"
   `(with-v4l2 (,v4l2-var ,path :w ,w
 			 :h ,h
 			 :pixformat ,pixformat
 			 :n-buffs ,n-buffs)
      (do-frames (,frame-var ,v4l2-var
-			    :user-vars ,user-vars
-			    :end-test-form ,end-test-form
-			    :return-form ,return-form)
-       ,@body)))
+			    :timer-var ,timer-var
+			    :user-vars ,user-vars)
+       :end-test-form ,end-test-form
+       :capture-success-body ,capture-success-body
+       :capture-falure-body  ,capture-falure-body
+       :return-form ,return-form)))
 ;;; </v4l2 syntax shugar>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; <fork(3p) + execv(3p) wrappers>

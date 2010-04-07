@@ -76,13 +76,14 @@
   #'(lambda ()
       (format t "cap thread start~%")
       (do-frames (frame (framesprocessor-v4l2 frameshow)
-			:end-test-form *cap-thread-stop*
-			:return-form
-			(progn
-			  (when (framesprocessor-ffmpeg-pipe frameshow)
-			    (kill-process-pipe (framesprocessor-ffmpeg-pipe frameshow)))
-			  (format t "cap thread exit~%")))
-	(process-frameshow frameshow frame))))
+			:timer-var timer)
+	:end-test-form *cap-thread-stop*
+	:return-form
+	(progn
+	  (when (framesprocessor-ffmpeg-pipe frameshow)
+	    (kill-process-pipe (framesprocessor-ffmpeg-pipe frameshow)))
+	  (format t "cap thread exit~%"))
+	:capture-success-body ((process-frameshow frameshow frame)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defclass mosaic-fragment (frameshow)
   ((camera-switcher :reader mosaic-fragment-camera-switcher
@@ -93,6 +94,7 @@
   #'(lambda ()
       (format t "cap thread start~%")
       (do-frames (frame (framesprocessor-v4l2 (aref mosaic 0))
+			:timer-var timer
 			:user-vars
 			((fragments-ln (length mosaic))
 			 (ref 0 (mod (1+ ref) fragments-ln))
@@ -105,20 +107,20 @@
 			     (mosaic-fragment-camera-switcher fragment))
 			 (switching-result
 			  (funcall switch)
-			  (funcall switch)))
-			:end-test-form
-			*cap-thread-stop*
-			:return-form
-			(progn
-			  (dotimes (i fragments-ln)
-			    (with-accessors ((pipe framesprocessor-ffmpeg-pipe))
-				(aref mosaic i)
-			      (when pipe
-				(kill-process-pipe pipe))))
-			  (format t "cap thread exit~%")))
-	(unless switching-result
-	  (format t "Switching camera failed!~%"))
-	(process-frameshow fragment frame))))
+			  (funcall switch))))
+	:end-test-form *cap-thread-stop*
+	:return-form
+	(progn
+	  (dotimes (i fragments-ln)
+	   (with-accessors ((pipe framesprocessor-ffmpeg-pipe))
+	       (aref mosaic i)
+	     (when pipe
+	       (kill-process-pipe pipe))))
+	 (format t "cap thread exit~%"))
+	:capture-success-body
+	((unless switching-result
+	   (format t "Switching camera failed!~%"))
+	 (process-frameshow fragment frame)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   "Modified camera initialisation function from cl-v4l2 example."
