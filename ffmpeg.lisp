@@ -268,7 +268,7 @@
 	    (when (and output-with output-height)
 	      (list "-s" (format nil "~Dx~D" output-with output-height)))
 	    (when output-frame-rate
-	      (list "-r" output-frame-rate))
+	      (list "-r" (format nil "~d" output-frame-rate)))
 	    (when overwrite-out
 	      (list "-y"))
 	    (list out))))
@@ -305,7 +305,7 @@
 ;; Launching ffmpeg after instance creation and relaunching after command
 ;; changing via `:after` methods
 (defun restart-framesprocessor-ffmpeg (frameshow cmd)
-  (with-accessors ((pipe framesprocessor-ffmpeg-pipe)) frameshow
+  (with-slots ((pipe ffmpeg-pipe)) frameshow
     (when pipe
       (kill-process-pipe pipe))
     (setf pipe (run-ffmpeg-pipe cmd))))
