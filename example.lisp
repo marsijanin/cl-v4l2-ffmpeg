@@ -62,16 +62,6 @@
 ;; some stuff from cl-v4l2 example:
 (defparameter *cap-thread-stop* nil)
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun char-at (pos data)
-  (code-char (ldb (byte 8 (* 8 pos)) data)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun format-string (pixfmt)
-  (format nil "~C~C~C~C"
-	  (char-at 0 pixfmt)
-	  (char-at 1 pixfmt)
-	  (char-at 2 pixfmt)
-	  (char-at 3 pixfmt)))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-capture-thread-fn (frameshow)
   #'(lambda ()
       (format t "cap thread start~%")
@@ -87,8 +77,24 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defclass mosaic-fragment (frameshow)
   ((camera-switcher :reader mosaic-fragment-camera-switcher
-		   :initarg :camera-switcher))
+		   :initarg :camera-switcher)
+   (framerate-threshold :reader mosaic-fragment-framerate-threshold
+			:initarg :framerate-threshold
+			:initform 5))
   (:metaclass gobject:gobject-class))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun correct-framerate (mosaic frame-capturing-time)
+  (with-accessors ((threshold mosaic-fragment-framerate-threshold)
+		   (cmd framesprocessor-ffmpeg-cmd)) mosaic
+    (with-accessors ((framerate ffmpeg-cmd-output-frame-rate)) cmd
+      (let ((actual-rate (/ 1 frame-capturing-time)))
+	(when (or (> (+ framerate threshold) actual-rate)
+		  (< (- framerate threshold) actual-rate))
+	  (format t "Restarting ffmpeg process with actual frame rate~%")
+	  (setf cmd (progn (setf (ffmpeg-cmd-output-frame-rate cmd)
+				 actual-rate)
+			   cmd))
+	  (sleep .1))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-capture-thread-fn-mosaic (mosaic)
   #'(lambda ()
@@ -120,6 +126,7 @@
 	:capture-success-body
 	((unless switching-result
 	   (format t "Switching camera failed!~%"))
+	 (correct-framerate fragment timer)
 	 (process-frameshow fragment frame)))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
@@ -239,11 +246,6 @@
       (bt:join-thread capturer)
       t)))				;just return something
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-(defun displace-array->vector (array)
-  (make-array (array-total-size array)
-	      :element-type (array-element-type array)
-	      :displaced-to array))
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-mosaic-fragments (n v4l2 &optional (prefix "camera"))
   ;; should be called inside `gtk:within-main-loop`
   (let* ((m (make-array n)))
@@ -259,6 +261,7 @@
 			   (make-ffmpeg-cmd :out (format nil
 							 "~a~d.mpg"
 							 prefix i)
+					    :output-frame-rate (truncate (/ 25 n))
 					    :input-width (v4l2-w v4l2)
 					    :input-height (v4l2-h v4l2))
 			   ;; Camera switching command here
