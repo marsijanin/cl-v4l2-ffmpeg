@@ -265,9 +265,10 @@
 			   :v4l2 v4l2
 			   :ffmpeg-cmd
 			   (make-ffmpeg-cmd :out (format nil
-							 "~a~d.mpg"
+							 "~a~d.avi"
 							 prefix i)
 					    :output-frame-rate (truncate (/ 25 n))
+					    :output-format "avi"
 					    :input-width (v4l2-w v4l2)
 					    :input-height (v4l2-h v4l2))
 			   ;; Camera switching command here
