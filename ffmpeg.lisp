@@ -201,10 +201,12 @@
     (handler-case
 	(progn
 	  (isys:kill pid 15)	;term
+	  (isys:waitpid pid (cffi:null-pointer) 1)
 	  (isys:kill pid 15)	;term
+	  (sleep .1)
+	  (isys:waitpid pid (cffi:null-pointer) 1)
 	  (isys:kill pid 9)	;and finally kill
 	  ;; TODO - write path for iolib.syscalls
-	  (isys:waitpid pid (cffi:null-pointer) 1)
 	  (sleep 1)			;dump with-timeout alternative
 	  (isys:waitpid pid (cffi:null-pointer) 1))
       ((or isys:echild isys:esrch) (c)
@@ -311,7 +313,7 @@
     (setf pipe (run-ffmpeg-pipe cmd))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmethod (setf framesprocessor-ffmpeg-cmd)
-    :after ((framesprocessor framesprocessor) (cmd ffmpeg-cmd))
+    :after ((framesprocessor framesprocessor) cmd)
   (restart-framesprocessor-ffmpeg framesprocessor cmd))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmethod shared-initialize :after ((instance framesprocessor) slot-names
