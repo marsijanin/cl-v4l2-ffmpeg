@@ -83,17 +83,20 @@
 			:initform 5))
   (:metaclass gobject:gobject-class))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defun thresholdp (value compare threshold)
+  (not (or (> value (+ compare threshold))
+	   (< value (- compare threshold)))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun correct-framerate (mosaic frame-capturing-time)
   (with-accessors ((threshold mosaic-fragment-framerate-threshold)
 		   (cmd framesprocessor-ffmpeg-cmd)) mosaic
     (with-accessors ((framerate ffmpeg-cmd-output-frame-rate)) cmd
       (let ((actual-rate (/ 1 frame-capturing-time)))
-	(when (or (> (+ framerate threshold) actual-rate)
-		  (< (- framerate threshold) actual-rate))
+	(unless (thresholdp actual-rate framerate threshold)
 	  (format t "Restarting ffmpeg process with actual frame rate~%")
-	  (setf cmd (progn (setf (ffmpeg-cmd-output-frame-rate cmd)
-				 actual-rate)
-			   cmd))
+	  (setf (ffmpeg-cmd-output-frame-rate cmd)
+		(truncate actual-rate)
+		cmd cmd)
 	  (sleep .1))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun make-capture-thread-fn-mosaic (mosaic)
@@ -102,7 +105,9 @@
       (do-frames (frame (framesprocessor-v4l2 (aref mosaic 0))
 			:timer-var timer
 			:user-vars
-			((fragments-ln (length mosaic))
+			((times (make-array 10))
+			 (times-cnt 1 (mod (1+ times-cnt) 10))
+			 (fragments-ln (length mosaic))
 			 (ref 0 (mod (1+ ref) fragments-ln))
 			 (fragment (aref mosaic ref) (aref mosaic ref))
 			 ;; If we will be call switchers inside
@@ -115,19 +120,20 @@
 			  (funcall switch)
 			  (funcall switch))))
 	:end-test-form *cap-thread-stop*
-	:return-form
-	(progn
-	  (dotimes (i fragments-ln)
-	   (with-accessors ((pipe framesprocessor-ffmpeg-pipe))
-	       (aref mosaic i)
-	     (when pipe
-	       (kill-process-pipe pipe))))
-	 (format t "cap thread exit~%"))
-	:capture-success-body
-	((unless switching-result
-	   (format t "Switching camera failed!~%"))
-	 (correct-framerate fragment timer)
-	 (process-frameshow fragment frame)))))
+	:return-form (progn
+		       (dotimes (i fragments-ln)
+			 (with-accessors ((pipe framesprocessor-ffmpeg-pipe))
+			     (aref mosaic i)
+			   (when pipe
+			     (kill-process-pipe pipe))))
+		       (format t "cap thread exit~%"))
+	:capture-success-body ((setf (aref times times-cnt) timer)
+			       (when (zerop times-cnt)
+				 (correct-framerate fragment
+						    (alexandria:mean times)))
+			       (process-frameshow fragment frame))
+	:always-body ((unless switching-result
+			(format t "Switching camera failed!~%"))))))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defun camera-init (widget)
   "Modified camera initialisation function from cl-v4l2 example."
