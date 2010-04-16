@@ -72,7 +72,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmacro do-frames ((frame-var v4l2 &key user-vars timer-var)
 		     &key capture-success-body capture-falure-body
-		     end-test-form return-form)
+		     always-body end-test-form return-form)
   "Iteration macro for v4l2 devices around `do*` macro.
    Execute `capture-success-body` each time call `v4l2:get-frame` was successful and until
    `end-test-form` is T, and call `v4l2:put-frame` after executing `capture-success-body`.
@@ -107,13 +107,15 @@
 	   (progn
 	     ,@capture-success-body
 	     (v4l2:put-frame ,fd ,frame-var))
-	   (progn ,@capture-falure-body)))))
+	   (progn ,@capture-falure-body))
+       ,@always-body)))
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defmacro with-v4l2-do-frames ((v4l2-var frame-var path &key (w 640) (h 480)
 					 (pixformat v4l2:pix-fmt-rgb24)
 					 (n-buffs 4)
 					 user-vars timer-var)
 			       &key capture-success-body capture-falure-body
+			       always-body
 			       end-test-form return-form)
   "`with-v4l2` and `do-frames` macros combination"
   `(with-v4l2 (,v4l2-var ,path :w ,w
@@ -126,6 +128,7 @@
        :end-test-form ,end-test-form
        :capture-success-body ,capture-success-body
        :capture-falure-body  ,capture-falure-body
+       :always-body ,always-body
        :return-form ,return-form)))
 ;;; </v4l2 syntax shugar>
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
